@@ -1,0 +1,13 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.clang-format
+/.vs/TestCoroutine
+/TestCoroutine/x64/Debug
+/TestCoroutine.sln
+/TestCoroutine.sln.DotSettings.user
+/TestCoroutine.vcxproj
+/TestCoroutine.vcxproj.filters
+/TestCoroutine.vcxproj.user
+/x64/Debug
