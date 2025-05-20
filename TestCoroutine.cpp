@@ -2,6 +2,11 @@
 #include <iostream>
 #include <thread>
 
+std::ostream& operator<<(std::ostream& os, const std::monostate&)
+{
+    return os << "void";
+}
+
 // 一个简单的协程，延迟打印并返回一个整数
 Coro<int> DelayedValue(int value, double delaySeconds)
 {
@@ -19,25 +24,34 @@ Coro<void> Delayed(double delaySeconds)
 Coro<void> TestAll()
 {
     std::cout << "TestAll start" << std::endl;
-    auto results = co_await All(
+    auto [a, b, c] = co_await All(
         DelayedValue(1, 0.1),
-        DelayedValue(2, 0.05),
+        Delayed(0.05),
         DelayedValue(3, 0.2));
-    std::cout << "Finished TestAll() values: ";
-    for (auto v : results)
-        std::cout << v << " ";
-    std::cout << std::endl;
+    std::cout << "Finished TestAll() values: " << a << b << c << std::endl;
 }
 
 // 演示 Any combinator：等待最先完成的协程
 Coro<void> TestAny()
 {
     std::cout << "TestAny start" << std::endl;
-    int winner = co_await Any(
+    auto [a, b, c] = co_await Any(
         DelayedValue(10, 0.15),
-        DelayedValue(20, 0.1),
+        Delayed(0.1),
         DelayedValue(30, 0.25));
-    std::cout << "Finished TestAny() value: " << winner << std::endl;
+    std::cout << "Finished TestAny() value: ";
+    if (a.has_value())
+        std::cout << a.value();
+    else
+        std::cout << "none";
+    if (b.has_value())
+        std::cout << b.value();
+    else
+        std::cout << "none";
+    if (c.has_value())
+        std::cout << c.value();
+    else
+        std::cout << "none";
 }
 
 Coro<void> TestWaitCoro()
@@ -64,13 +78,13 @@ int main()
     using namespace std::chrono_literals;
 
     // 1) All
-    auto h1 = Scheduler::Start(TestAll());
+    auto h1 = Scheduler::Instance().Start(TestAll);
     // 2) Any
-    auto h2 = Scheduler::Start(TestAny());
+    auto h2 = Scheduler::Instance().Start(TestAny);
     // 3) Long running + stop
-    auto h3 = Scheduler::Start(LongRunning());
+    auto h3 = Scheduler::Instance().Start(LongRunning);
 
-    auto h4 = Scheduler::Start(TestWaitCoro());
+    auto h4 = Scheduler::Instance().Start(TestWaitCoro);
 
     // 模拟帧更新
     int frame = 0;
@@ -78,10 +92,15 @@ int main()
     {
         // std::cout << "-- Frame " << ++frame << " --" << std::endl;
 
-        if (frame == 50)
+        if (frame == 20)
         {
             std::cout << "Stopping LongRunning at frame " << frame << std::endl;
             h3.Stop(); // 取消协程
+        }
+
+        if (frame == 26)
+        {
+            break;
         }
 
         Scheduler::Instance().Update();
