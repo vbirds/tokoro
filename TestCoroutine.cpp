@@ -52,6 +52,8 @@ Coro<void> TestAny()
         std::cout << c.value();
     else
         std::cout << "none";
+
+    std::cout << std::endl;
 }
 
 Coro<void> TestWaitCoro()
@@ -83,14 +85,18 @@ int main()
     auto h2 = Scheduler::Instance().Start(TestAny);
     // 3) Long running + stop
     auto h3 = Scheduler::Instance().Start(LongRunning);
-
+    // 4) Wait single coro
     auto h4 = Scheduler::Instance().Start(TestWaitCoro);
+    // 5) Get return
+    auto h5 = Scheduler::Instance().Start(DelayedValue, 99, 0.2);
 
-    // Ä£ÄâÖ¡¸üÐÂ
     int frame = 0;
     while (true)
     {
-        // std::cout << "-- Frame " << ++frame << " --" << std::endl;
+        if (h5.IsDown())
+        {
+            std::cout << "Handle return value:" << h5.GetReturn().value() << std::endl;
+        }
 
         if (frame == 20)
         {
