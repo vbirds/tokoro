@@ -250,6 +250,15 @@ private:
 public:
     using Iterator = typename SetType::const_iterator;
 
+    void Clear()
+    {
+        mSet.clear();
+        mAddOrder   = 0;
+        mAddFrame   = 0;
+        mUpdatePtr  = mSet.end();
+        mCurExeTime = TimePoint::min();
+    }
+
     Iterator Add(const T& e)
     {
         return AddImpl(TimePoint::min(), e);
@@ -369,6 +378,12 @@ public:
     {
         static Scheduler s;
         return s;
+    }
+
+    ~Scheduler()
+    {
+        mCoroutines.clear();
+        mExecuteQueue.Clear();
     }
 
     template <typename Task, typename... Args>
