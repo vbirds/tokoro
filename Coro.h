@@ -119,37 +119,8 @@ public:
     }
 };
 
-class CoroBase
-{
-public:
-    CoroBase(std::coroutine_handle<> h)
-        : mHandle(h)
-    {
-    }
-
-    CoroBase(CoroBase&& o)
-        : mHandle(o.mHandle)
-    {
-        o.mHandle = nullptr;
-    }
-
-    virtual ~CoroBase()
-    {
-        if (mHandle)
-            mHandle.destroy();
-    }
-
-    void Resume()
-    {
-        mHandle.resume();
-    }
-
-protected:
-    std::coroutine_handle<> mHandle;
-};
-
 template <typename T>
-class Coro : public CoroBase
+class Coro
 {
 public:
     using promise_type = Promise<T>;
@@ -157,15 +128,26 @@ public:
     using handle_type  = std::coroutine_handle<promise_type>;
 
     Coro(handle_type h)
-        : CoroBase(h)
+        : mHandle(h)
     {
     }
 
-    Coro(const Coro&) = delete;
+    Coro(const Coro&)
+    {
+        // This is only for any compatibility. You should never use this.
+        assert(false);
+    }
 
     Coro(Coro&& o)
-        : CoroBase(std::move(o))
+        : mHandle(o.mHandle)
     {
+        o.mHandle = nullptr;
+    }
+
+    ~Coro()
+    {
+        if (mHandle)
+            mHandle.destroy();
     }
 
     void SetId(uint64_t id)
@@ -178,7 +160,15 @@ public:
         return std::coroutine_handle<promise_type>::from_address(mHandle.address());
     }
 
+    void Resume()
+    {
+        mHandle.resume();
+    }
+
     auto operator co_await() noexcept;
+
+private:
+    std::coroutine_handle<> mHandle;
 };
 
 template <typename T>
@@ -389,22 +379,20 @@ public:
     template <typename Task, typename... Args>
     auto Start(Task&& task, Args&&... args)
     {
-        uint64_t id = mNextId++;
-
+        uint64_t id       = mNextId++;
         using RawCoroType = std::invoke_result_t<Task, Args...>;
         using CoroType    = std::decay_t<RawCoroType>;
-
-        static_assert(std::is_base_of_v<CoroBase, CoroType>,
-                      "First parameter must be a callable object (function, lambda ect..) returns Coro<T>");
-
-        using CoroRet = typename CoroType::value_type;
-
-        auto newCoro = std::forward<Task>(task)(std::forward<Args>(args)...);
+        auto newCoro      = std::forward<Task>(task)(std::forward<Args>(args)...);
         newCoro.SetId(id);
 
-        auto [iter, succeed] = mCoroutines.emplace(id, Entry{std::make_unique<CoroType>(std::move(newCoro)), false, {}});
-        iter->second.coro->Resume();
-        return TaskHandle<CoroRet>{id};
+        Entry newEntry{
+            std::any(std::move(newCoro)),
+            false,
+            std::any{}};
+
+        auto [iter, succeed] = mCoroutines.emplace(id, std::move(newEntry));
+        std::any_cast<CoroType&>(iter->second.coro).Resume();
+        return TaskHandle<typename CoroType::value_type>{id};
     }
 
     static TimeAwaiter NextFrame() noexcept;
@@ -441,9 +429,9 @@ private:
 
     struct Entry
     {
-        std::unique_ptr<CoroBase> coro;
-        bool                      finished;
-        std::any                  returnValue;
+        std::any coro;
+        bool     finished;
+        std::any returnValue;
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
