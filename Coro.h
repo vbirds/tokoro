@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TmplAny.h"
+
 #include <any>
 #include <assert.h>
 #include <atomic>
@@ -382,17 +384,20 @@ public:
         uint64_t id       = mNextId++;
         using RawCoroType = std::invoke_result_t<Task, Args...>;
         using CoroType    = std::decay_t<RawCoroType>;
-        auto newCoro      = std::forward<Task>(task)(std::forward<Args>(args)...);
+        using RetType     = typename CoroType::value_type;
+
+        auto newCoro = std::forward<Task>(task)(std::forward<Args>(args)...);
         newCoro.SetId(id);
 
         Entry newEntry{
-            std::any(std::move(newCoro)),
+            std::move(newCoro),
             false,
             std::any{}};
 
         auto [iter, succeed] = mCoroutines.emplace(id, std::move(newEntry));
-        std::any_cast<CoroType&>(iter->second.coro).Resume();
-        return TaskHandle<typename CoroType::value_type>{id};
+        iter->second.coro.get<RetType>().Resume();
+
+        return TaskHandle<RetType>{id};
     }
 
     static TimeAwaiter NextFrame() noexcept;
@@ -429,9 +434,9 @@ private:
 
     struct Entry
     {
-        std::any coro;
-        bool     finished;
-        std::any returnValue;
+        TmplAny<Coro> coro;
+        bool          finished;
+        std::any      returnValue;
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
