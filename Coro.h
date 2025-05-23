@@ -395,7 +395,7 @@ public:
             std::any{}};
 
         auto [iter, succeed] = mCoroutines.emplace(id, std::move(newEntry));
-        iter->second.coro.get<RetType>().Resume();
+        iter->second.coro.WithArg<RetType>().Resume();
 
         return TaskHandle<RetType>{id};
     }
@@ -559,6 +559,7 @@ inline void Scheduler::Release(uint64_t id)
     auto it = mCoroutines.find(id);
     if (it != mCoroutines.end() && it->second.finished)
     {
+        // todo Release does not remove coroutine
         mCoroutines.erase(it);
     }
 }
@@ -580,7 +581,8 @@ inline void Scheduler::Stop(uint64_t id)
     auto it = mCoroutines.find(id);
     if (it != mCoroutines.end())
     {
-        it->second.coro.reset();
+        // todo Stop dose not remove coroutine.
+        it->second.coro.Reset();
         mCoroutines.erase(it);
     }
 }
