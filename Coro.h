@@ -346,11 +346,17 @@ template <typename T>
 class TaskHandle
 {
 public:
+    TaskHandle(TaskHandle&& other)
+        : mId(other.mId)
+    {
+        other.mId = 0;
+    }
     ~TaskHandle();
-    bool             IsValid() const noexcept;
-    bool             IsDown() const noexcept;
-    void             Stop() const noexcept;
-    std::optional<T> GetReturn() const noexcept;
+    bool IsDown() const noexcept;
+    void Stop() const noexcept;
+
+    std::optional<T> GetReturn() const noexcept
+        requires(!std::is_void_v<T>);
 
 private:
     friend Scheduler;
@@ -389,11 +395,7 @@ public:
         auto newCoro = std::forward<Task>(task)(std::forward<Args>(args)...);
         newCoro.SetId(id);
 
-        Entry newEntry{
-            std::move(newCoro),
-            false,
-            std::any{}};
-
+        Entry newEntry{std::move(newCoro), false, false, std::any{}};
         auto [iter, succeed] = mCoroutines.emplace(id, std::move(newEntry));
         iter->second.coro.WithArg<RetType>().Resume();
 
@@ -413,7 +415,6 @@ private:
     friend PromiseBase;
 
     void Release(uint64_t id);
-    bool IsValid(uint64_t id);
     bool IsDown(uint64_t id);
     void Stop(uint64_t id);
 
@@ -423,19 +424,15 @@ private:
     void OnCoroutineFinished(uint64_t id, std::any&& result)
     {
         auto& e       = mCoroutines[id];
-        e.finished    = true;
         e.returnValue = std::move(result);
-    }
-
-    void OnCoroutineFinished(uint64_t id)
-    {
-        mCoroutines[id].finished = true;
+        Stop(id);
     }
 
     struct Entry
     {
         TmplAny<Coro> coro;
         bool          finished;
+        bool          released;
         std::any      returnValue;
     };
 
@@ -501,13 +498,10 @@ auto Coro<T>::operator co_await() noexcept
 template <typename T>
 TaskHandle<T>::~TaskHandle()
 {
-    Scheduler::Instance().Release(mId);
-}
-
-template <typename T>
-bool TaskHandle<T>::IsValid() const noexcept
-{
-    return Scheduler::Instance().IsValid(mId);
+    if (mId != 0)
+    {
+        Scheduler::Instance().Release(mId);
+    }
 }
 
 template <typename T>
@@ -524,14 +518,9 @@ void TaskHandle<T>::Stop() const noexcept
 
 template <typename T>
 std::optional<T> TaskHandle<T>::GetReturn() const noexcept
+    requires(!std::is_void_v<T>)
 {
     return Scheduler::Instance().GetReturn<T>(mId);
-}
-
-template <typename T>
-std::optional<T> Scheduler::GetReturn(uint64_t id)
-{
-    return std::any_cast<T>(mCoroutines[id].returnValue);
 }
 
 inline TimeAwaiter Scheduler::NextFrame() noexcept
@@ -557,34 +546,39 @@ inline void Scheduler::Update()
 inline void Scheduler::Release(uint64_t id)
 {
     auto it = mCoroutines.find(id);
-    if (it != mCoroutines.end() && it->second.finished)
-    {
-        // todo Release does not remove coroutine
-        mCoroutines.erase(it);
-    }
-}
+    assert(it != mCoroutines.end() && !it->second.released);
 
-inline bool Scheduler::IsValid(uint64_t id)
-{
-    auto it = mCoroutines.find(id);
-    return it != mCoroutines.end() && !it->second.finished;
+    it->second.released = true;
+    if (it->second.released && it->second.finished)
+        mCoroutines.erase(it);
 }
 
 inline bool Scheduler::IsDown(uint64_t id)
 {
-    auto it = mCoroutines.find(id);
-    return it != mCoroutines.end() && it->second.finished;
+    const auto it = mCoroutines.find(id);
+    assert(it != mCoroutines.end());
+    return it->second.finished;
 }
 
 inline void Scheduler::Stop(uint64_t id)
 {
-    auto it = mCoroutines.find(id);
-    if (it != mCoroutines.end())
+    const auto it = mCoroutines.find(id);
+    assert(it != mCoroutines.end());
+
+    if (!it->second.finished)
     {
-        // todo Stop dose not remove coroutine.
+        it->second.finished = true;
         it->second.coro.Reset();
-        mCoroutines.erase(it);
+
+        if (it->second.released && it->second.finished)
+            mCoroutines.erase(it);
     }
+}
+
+template <typename T>
+std::optional<T> Scheduler::GetReturn(uint64_t id)
+{
+    return std::any_cast<T>(mCoroutines[id].returnValue);
 }
 
 template <typename T>

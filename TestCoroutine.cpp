@@ -82,26 +82,21 @@ int main()
     // 1) All
     auto h1 = Scheduler::Instance().Start(TestAll);
     // 2) Any
-    auto h2 = Scheduler::Instance().Start(TestAny);
+    Scheduler::Instance().Start(TestAny);
     // 3) Long running + stop
     auto h3 = Scheduler::Instance().Start(LongRunning);
     // 4) Wait single coro
-    auto h4 = Scheduler::Instance().Start(TestWaitCoro);
+    Scheduler::Instance().Start(TestWaitCoro);
     // 5) Get return
     auto h5 = Scheduler::Instance().Start(DelayedValue, 99, 0.2);
 
     int frame = 0;
     while (true)
     {
-        if (h5.IsDown())
-        {
-            std::cout << "Handle return value:" << h5.GetReturn().value() << std::endl;
-        }
-
         if (frame == 20)
         {
             std::cout << "Stopping LongRunning at frame " << frame << std::endl;
-            h3.Stop(); // 取消协程
+            h3.Stop();
         }
 
         if (frame == 26)
@@ -113,6 +108,17 @@ int main()
         std::this_thread::sleep_for(33.3ms);
 
         frame++;
+    }
+
+    if (h1.IsDown())
+    {
+        // This will compile error since TaskHandle<void> does not have GetReturn()
+        // std::cout << "Handle return value:" << h1.GetReturn() << std::endl;
+    }
+
+    if (h5.IsDown())
+    {
+        std::cout << "Handle return value:" << h5.GetReturn().value() << std::endl;
     }
 
     return 0;
