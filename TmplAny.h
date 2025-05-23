@@ -1,7 +1,9 @@
 #pragma once
+#include <assert.h>
 #include <cstddef>
 #include <new>
 #include <type_traits>
+#include <typeindex>
 #include <utility>
 
 // Detect if a template template parameter is instantiable
@@ -25,17 +27,17 @@ class TmplAny
     static_assert(is_instantiable<Tmpl, PlaceholderT>::value,
                   "PlaceholderT cannot be used to instantiate Tmpl<PlaceholderT>");
 
-public:
-    using Placeholder                         = Tmpl<PlaceholderT>;
+    using Placeholder = Tmpl<PlaceholderT>;
+
     static constexpr std::size_t StorageSize  = sizeof(Placeholder);
     static constexpr std::size_t StorageAlign = alignof(Placeholder);
 
-private:
     struct VTable
     {
         void (*destroy)(void*) noexcept;
         void (*copy)(const void*, void*);
         void (*move)(void*, void*);
+        std::type_index type_index;
     };
     alignas(StorageAlign) unsigned char storage_[StorageSize];
     const VTable* vtable_ = nullptr;
@@ -44,7 +46,7 @@ private:
     template <typename Actual>
     static const VTable* make_vtable()
     {
-        static VTable vt;
+        static VTable vt{.type_index = typeid(Actual)};
         vt.destroy = +[](void* p) noexcept { reinterpret_cast<Actual*>(p)->~Actual(); };
         if constexpr (std::is_copy_constructible_v<Actual>)
         {
@@ -174,11 +176,14 @@ public:
     template <typename U>
     Tmpl<U>& WithArg()
     {
+        assert(vtable_ && vtable_->type_index == typeid(Tmpl<U>));
         return *reinterpret_cast<Tmpl<U>*>(storage_);
     }
+
     template <typename U>
     const Tmpl<U>& WithArg() const
     {
+        assert(vtable_ && vtable_->type_index == typeid(Tmpl<U>));
         return *reinterpret_cast<const Tmpl<U>*>(storage_);
     }
 };
