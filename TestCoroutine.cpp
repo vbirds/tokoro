@@ -75,6 +75,43 @@ Coro<void> LongRunning()
     }
 }
 
+class ValuePrinter
+{
+public:
+    ValuePrinter(int value)
+        : mValue(value)
+    {
+        std::cout << "ValuePrinter " << mValue << std::endl;
+    }
+
+    ValuePrinter(ValuePrinter&& other)
+        : mValue(other.mValue)
+    {
+        std::cout << "ValuePrinter move " << mValue << std::endl;
+        other.mValue = 0;
+    }
+
+    ValuePrinter(const ValuePrinter& other)
+    {
+        mValue = other.mValue;
+        std::cout << "ValuePrinter Copy " << mValue << std::endl;
+    }
+
+    ~ValuePrinter()
+    {
+        std::cout << "~ValuePrinter " << mValue << std::endl;
+        mValue = 0;
+    }
+
+    void Print() const
+    {
+        std::cout << "ValuePrinter Print " << mValue << std::endl;
+    }
+
+private:
+    int mValue = 0;
+};
+
 int main()
 {
     using namespace std::chrono_literals;
@@ -89,6 +126,12 @@ int main()
     Scheduler::Instance().Start(TestWaitCoro);
     // 5) Get return
     auto h5 = Scheduler::Instance().Start(DelayedValue, 99, 0.2);
+
+    ValuePrinter printer(101);
+    Scheduler::Instance().Start([=]() -> Coro<void> {
+        co_await Scheduler::Instance().Wait(0.5);
+        printer.Print();
+    });
 
     int frame = 0;
     while (true)

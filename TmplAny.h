@@ -174,14 +174,14 @@ public:
 
     // Access underlying object. Requires U to have matching size with placeholder.
     template <typename U>
-    Tmpl<U>& WithArg()
+    Tmpl<U>& WithTmplArg()
     {
         assert(vtable_ && vtable_->type_index == typeid(Tmpl<U>));
         return *reinterpret_cast<Tmpl<U>*>(storage_);
     }
 
     template <typename U>
-    const Tmpl<U>& WithArg() const
+    const Tmpl<U>& WithTmplArg() const
     {
         assert(vtable_ && vtable_->type_index == typeid(Tmpl<U>));
         return *reinterpret_cast<const Tmpl<U>*>(storage_);

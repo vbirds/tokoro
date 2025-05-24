@@ -9,10 +9,8 @@
 #include <chrono>
 #include <coroutine>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <set>
-#include <vector>
 
 using Clock         = std::chrono::steady_clock;
 using TimePoint     = Clock::time_point;
@@ -384,20 +382,29 @@ public:
         mExecuteQueue.Clear();
     }
 
-    template <typename Task, typename... Args>
-    auto Start(Task&& task, Args&&... args)
+    template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
+    TaskHandle<RetType> Start(Task&& task, Args&&... args)
     {
-        uint64_t id       = mNextId++;
-        using RawCoroType = std::invoke_result_t<Task, Args...>;
-        using CoroType    = std::decay_t<RawCoroType>;
-        using RetType     = typename CoroType::value_type;
+        uint64_t id          = mNextId++;
+        auto [iter, succeed] = mCoroutines.emplace(id, Entry());
 
-        auto newCoro = std::forward<Task>(task)(std::forward<Args>(args)...);
+        Entry& newEntry = iter->second;
+
+        // Cache the input function and parameters into a lambda to avoid the famous C++ coroutine pitfall.
+        // https://devblogs.microsoft.com/oldnewthing/20211103-00/?p=105870
+        // <A capturing lambda can be a coroutine, but you have to save your captures while you still can>
+        newEntry.lambda = [task = std::forward<Task>(task), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+            return std::apply(task, tup);
+        };
+
+        // Create the Coro<T>
+        newEntry.coro = newEntry.lambda();
+
+        auto& newCoro = newEntry.coro.WithTmplArg<RetType>();
         newCoro.SetId(id);
 
-        Entry newEntry{std::move(newCoro), false, false, std::any{}};
-        auto [iter, succeed] = mCoroutines.emplace(id, std::move(newEntry));
-        iter->second.coro.WithArg<RetType>().Resume();
+        // Kick off the coroutine.
+        newCoro.Resume();
 
         return TaskHandle<RetType>{id};
     }
@@ -430,10 +437,11 @@ private:
 
     struct Entry
     {
-        TmplAny<Coro> coro;
-        bool          finished;
-        bool          released;
-        std::any      returnValue;
+        TmplAny<Coro>                  coro;
+        std::function<TmplAny<Coro>()> lambda;
+        bool                           finished = false;
+        bool                           released = false;
+        std::any                       returnValue;
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
@@ -569,6 +577,7 @@ inline void Scheduler::Stop(uint64_t id)
     {
         it->second.finished = true;
         it->second.coro.Reset();
+        it->second.lambda = {};
 
         if (it->second.released && it->second.finished)
             mCoroutines.erase(it);
