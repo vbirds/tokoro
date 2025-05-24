@@ -22,8 +22,7 @@ struct CoroAwaiterBase
     virtual ~CoroAwaiterBase()                                    = default;
 };
 
-template <typename T>
-class PromiseShared
+class PromiseBase
 {
 public:
     std::suspend_always initial_suspend() noexcept
@@ -71,7 +70,7 @@ protected:
 };
 
 template <typename T>
-class Promise : public PromiseShared<T>
+class Promise : public PromiseBase
 {
 public:
     using Handle = std::coroutine_handle<Promise<T>>;
@@ -98,7 +97,7 @@ public:
 };
 
 template <>
-class Promise<void> : public PromiseShared<void>
+class Promise<void> : public PromiseBase
 {
 public:
     using Handle = std::coroutine_handle<Promise<void>>;
@@ -413,7 +412,7 @@ private:
     friend TimeAwaiter;
     friend TaskHandle;
     friend Coro;
-    friend PromiseShared;
+    friend PromiseBase;
 
     void Release(uint64_t id);
     bool IsDown(uint64_t id);
@@ -584,10 +583,9 @@ std::optional<T> Scheduler::GetReturn(uint64_t id)
     return std::any_cast<T>(mCoroutines[id].returnValue);
 }
 
-template <typename T>
-void PromiseShared<T>::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
+void PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
 {
-    auto             handle        = std::coroutine_handle<PromiseShared<T>>::from_address(h.address());
+    auto             handle        = std::coroutine_handle<PromiseBase>::from_address(h.address());
     auto&            promise       = handle.promise();
     const uint64_t   coroId        = promise.mId;
     CoroAwaiterBase* parentAwaiter = promise.mAwaiter;
