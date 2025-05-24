@@ -7,7 +7,6 @@ std::ostream& operator<<(std::ostream& os, const std::monostate&)
     return os << "void";
 }
 
-// 一个简单的协程，延迟打印并返回一个整数
 Coro<int> DelayedValue(int value, double delaySeconds)
 {
     co_await Scheduler::Wait(delaySeconds);
@@ -20,7 +19,6 @@ Coro<void> Delayed(double delaySeconds)
     co_return;
 }
 
-// 演示 All combinator：等待所有协程完成
 Coro<void> TestAll()
 {
     std::cout << "TestAll start" << std::endl;
@@ -31,7 +29,6 @@ Coro<void> TestAll()
     std::cout << "Finished TestAll() values: " << a << b << c << std::endl;
 }
 
-// 演示 Any combinator：等待最先完成的协程
 Coro<void> TestAny()
 {
     std::cout << "TestAny start" << std::endl;
@@ -64,7 +61,6 @@ Coro<void> TestWaitCoro()
     std::cout << "TestWaitCoro Finished" << value << std::endl;
 }
 
-// 演示 stop(): 取消并销毁协程
 Coro<void> LongRunning()
 {
     int i = 0;
@@ -157,11 +153,12 @@ int main()
     {
         // This will compile error since TaskHandle<void> does not have GetReturn()
         // std::cout << "Handle return value:" << h1.GetReturn() << std::endl;
+        std::cout << "h1 finished" << std::endl;
     }
 
     if (h5.IsDown())
     {
-        std::cout << "Handle return value:" << h5.GetReturn().value() << std::endl;
+        std::cout << "h5 return value:" << h5.GetReturn().value() << std::endl;
     }
 
     return 0;
