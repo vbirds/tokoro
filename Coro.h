@@ -132,12 +132,6 @@ public:
     {
     }
 
-    Coro(const Coro&)
-    {
-        // This is only for any compatibility. You should never use this.
-        assert(false);
-    }
-
     Coro(Coro&& o)
         : mHandle(o.mHandle)
     {
