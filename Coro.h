@@ -166,10 +166,10 @@ private:
 };
 
 template <typename T>
-class CoroAwaiter : public CoroAwaiterBase
+class SingleCoroAwaiter : public CoroAwaiterBase
 {
 public:
-    CoroAwaiter(std::coroutine_handle<Promise<T>> handle)
+    SingleCoroAwaiter(std::coroutine_handle<Promise<T>> handle)
         : mMyHandle(handle)
     {
     }
@@ -494,7 +494,7 @@ private:
 template <typename T>
 auto Coro<T>::operator co_await() noexcept
 {
-    return CoroAwaiter(GetHandle());
+    return SingleCoroAwaiter(GetHandle());
 }
 
 template <typename T>
