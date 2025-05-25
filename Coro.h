@@ -22,6 +22,8 @@ struct CoroAwaiterBase
     virtual ~CoroAwaiterBase()                                    = default;
 };
 
+class Scheduler;
+
 class PromiseBase
 {
 public:
@@ -58,15 +60,26 @@ public:
         mId = id;
     }
 
+    void SetScheduler(Scheduler* scheduler)
+    {
+        mScheduler = scheduler;
+    }
+
+    Scheduler* GetScheduler() const
+    {
+        return mScheduler;
+    }
+
     void SetParentAwaiter(CoroAwaiterBase* awaiter)
     {
-        mAwaiter = awaiter;
+        mParentAwaiter = awaiter;
     }
 
 protected:
     std::any         mReturnValue;
-    uint64_t         mId      = 0;
-    CoroAwaiterBase* mAwaiter = nullptr;
+    uint64_t         mId            = 0;
+    CoroAwaiterBase* mParentAwaiter = nullptr;
+    Scheduler*       mScheduler     = nullptr;
 };
 
 template <typename T>
@@ -148,6 +161,11 @@ public:
         GetHandle().promise().SetId(id);
     }
 
+    void SetScheduler(Scheduler* scheduler)
+    {
+        GetHandle().promise().SetScheduler(scheduler);
+    }
+
     std::coroutine_handle<promise_type> GetHandle()
     {
         return std::coroutine_handle<promise_type>::from_address(mHandle.address());
@@ -169,7 +187,7 @@ class SingleCoroAwaiter : public CoroAwaiterBase
 {
 public:
     SingleCoroAwaiter(std::coroutine_handle<Promise<T>> handle)
-        : mMyHandle(handle)
+        : mWaitedHandle(handle)
     {
     }
 
@@ -178,17 +196,22 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    template <typename U>
+    void await_suspend(std::coroutine_handle<Promise<U>> handle) noexcept
     {
-        mParentHandle = handle;
-        mMyHandle.promise().SetParentAwaiter(this);
-        mMyHandle.resume();
+        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(handle.address());
+
+        auto& promise = mWaitedHandle.promise();
+        promise.SetScheduler(mParentHandle.promise().GetScheduler());
+        promise.SetParentAwaiter(this);
+
+        mWaitedHandle.resume(); // Kick off child Coro<T>
     }
 
     auto await_resume() const noexcept
         requires(!std::is_void_v<T>)
     {
-        return mMyHandle.promise().GetReturnValue();
+        return mWaitedHandle.promise().GetReturnValue();
     }
 
     void await_resume() const noexcept
@@ -202,8 +225,8 @@ public:
     }
 
 private:
-    std::coroutine_handle<Promise<T>> mMyHandle;
-    std::coroutine_handle<>           mParentHandle;
+    std::coroutine_handle<Promise<T>>  mWaitedHandle;
+    std::coroutine_handle<PromiseBase> mParentHandle;
 };
 
 template <typename T>
@@ -337,12 +360,10 @@ template <typename T>
 class TaskHandle
 {
 public:
-    TaskHandle(TaskHandle&& other)
-        : mId(other.mId)
-    {
-        other.mId = 0;
-    }
+    TaskHandle(TaskHandle&& other);
+    TaskHandle(const TaskHandle& other) = delete;
     ~TaskHandle();
+
     bool IsDown() const noexcept;
     void Stop() const noexcept;
 
@@ -352,12 +373,14 @@ public:
 private:
     friend Scheduler;
 
-    TaskHandle(uint64_t id)
-        : mId(id)
+    TaskHandle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
+        : mId(id), mScheduler(scheduler), mSchedulerLiveSignal(liveSignal)
     {
     }
 
-    uint64_t mId = 0;
+    uint64_t                      mId        = 0;
+    Scheduler*                    mScheduler = nullptr;
+    std::weak_ptr<std::monostate> mSchedulerLiveSignal;
 };
 
 class Scheduler
@@ -367,6 +390,11 @@ public:
     {
         static Scheduler s;
         return s;
+    }
+
+    Scheduler()
+    {
+        mLiveSignal = std::make_shared<std::monostate>();
     }
 
     ~Scheduler()
@@ -395,11 +423,12 @@ public:
 
         auto& newCoro = newEntry.coro.WithTmplArg<RetType>();
         newCoro.SetId(id);
+        newCoro.SetScheduler(this);
 
         // Kick off the coroutine.
         newCoro.Resume();
 
-        return TaskHandle<RetType>{id};
+        return TaskHandle<RetType>{id, this, mLiveSignal};
     }
 
     static TimeAwaiter NextFrame() noexcept;
@@ -440,6 +469,7 @@ private:
     std::unordered_map<uint64_t, Entry> mCoroutines;
     std::atomic<uint64_t>               mNextId{1};
     TimeQueue<TimeAwaiter*>             mExecuteQueue;
+    std::shared_ptr<std::monostate>     mLiveSignal;
 };
 
 class TimeAwaiter
@@ -458,7 +488,7 @@ public:
     virtual ~TimeAwaiter()
     {
         if (mExeIter.has_value())
-            Scheduler::Instance().mExecuteQueue.Remove(*mExeIter);
+            mHandle.promise().GetScheduler()->mExecuteQueue.Remove(*mExeIter);
     }
 
     bool await_ready() const noexcept
@@ -466,10 +496,11 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    template <typename T>
+    void await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
     {
-        mHandle  = std::coroutine_handle<>::from_address(handle.address());
-        mExeIter = Scheduler::Instance().mExecuteQueue.AddTimed(mWhen, this);
+        mHandle  = std::coroutine_handle<PromiseBase>::from_address(handle.address());
+        mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
     }
 
     void await_resume() const noexcept
@@ -487,7 +518,7 @@ public:
 private:
     std::optional<TimeQueue<TimeAwaiter*>::Iterator> mExeIter;
     TimePoint                                        mWhen;
-    std::coroutine_handle<>                          mHandle = nullptr;
+    std::coroutine_handle<PromiseBase>               mHandle = nullptr;
 };
 
 template <typename T>
@@ -497,31 +528,43 @@ auto Coro<T>::operator co_await() noexcept
 }
 
 template <typename T>
+TaskHandle<T>::TaskHandle(TaskHandle&& other)
+    : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
+{
+    other.mId                  = 0;
+    other.mScheduler           = nullptr;
+    other.mSchedulerLiveSignal = nullptr;
+}
+
+template <typename T>
 TaskHandle<T>::~TaskHandle()
 {
-    if (mId != 0)
+    if (mId != 0 && !mSchedulerLiveSignal.expired())
     {
-        Scheduler::Instance().Release(mId);
+        mScheduler->Release(mId);
     }
 }
 
 template <typename T>
 bool TaskHandle<T>::IsDown() const noexcept
 {
-    return Scheduler::Instance().IsDown(mId);
+    return mSchedulerLiveSignal.expired() || mScheduler->IsDown(mId);
 }
 
 template <typename T>
 void TaskHandle<T>::Stop() const noexcept
 {
-    Scheduler::Instance().Stop(mId);
+    if (!mSchedulerLiveSignal.expired())
+        mScheduler->Stop(mId);
 }
 
 template <typename T>
 std::optional<T> TaskHandle<T>::GetReturn() const noexcept
     requires(!std::is_void_v<T>)
 {
-    return Scheduler::Instance().GetReturn<T>(mId);
+    if (mSchedulerLiveSignal.expired())
+        return std::nullopt;
+    return mScheduler->GetReturn<T>(mId);
 }
 
 inline TimeAwaiter Scheduler::NextFrame() noexcept
@@ -588,7 +631,7 @@ void PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const n
     auto             handle        = std::coroutine_handle<PromiseBase>::from_address(h.address());
     auto&            promise       = handle.promise();
     const uint64_t   coroId        = promise.mId;
-    CoroAwaiterBase* parentAwaiter = promise.mAwaiter;
+    CoroAwaiterBase* parentAwaiter = promise.mParentAwaiter;
 
     // Can't have awaiter and coroId both.
     assert(parentAwaiter == nullptr || coroId == 0);
@@ -599,18 +642,18 @@ void PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const n
     }
     else if (coroId != 0)
     {
-        Scheduler::Instance().OnCoroutineFinished(coroId, std::move(promise.mReturnValue));
+        promise.GetScheduler()->OnCoroutineFinished(coroId, std::move(promise.mReturnValue));
     }
 }
 
 // ¡ª¡ª All & Any ¡ª¡ª
 
+namespace detail
+{
+
 // map void to monostate
 template <typename T>
 using Ret = std::conditional_t<std::is_void_v<T>, std::monostate, T>;
-
-namespace detail
-{
 
 // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 //  Awaiter for All: waits all, returns tuple<Ret<Ts>...>
@@ -618,37 +661,38 @@ namespace detail
 template <typename... Ts>
 struct AllAwaiter : CoroAwaiterBase
 {
-    std::tuple<Coro<Ts>...> coros;
-    std::tuple<Ret<Ts>...>  results;
-    std::size_t             remaining;
-    std::coroutine_handle<> continuation;
+    std::tuple<Coro<Ts>...>            mWaitedCoros;
+    std::tuple<Ret<Ts>...>             mResults;
+    std::size_t                        mRemainingCount;
+    std::coroutine_handle<PromiseBase> mParentHandle;
 
     AllAwaiter(Coro<Ts>&&... cs)
-        : coros(std::move(cs)...), remaining(sizeof...(Ts))
+        : mWaitedCoros(std::move(cs)...), mRemainingCount(sizeof...(Ts))
     {
     }
 
     bool await_ready() const noexcept
     {
-        return remaining == 0;
+        return mRemainingCount == 0;
     }
 
-    void await_suspend(std::coroutine_handle<> h) noexcept
+    template <typename T>
+    void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
     {
-        continuation = h;
+        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
         resume_all(std::index_sequence_for<Ts...>{});
     }
 
     auto await_resume() noexcept
     {
-        return results;
+        return mResults;
     }
 
     void OnWaitComplete(std::coroutine_handle<> h) noexcept override
     {
         store_result(h, std::index_sequence_for<Ts...>{});
-        if (--remaining == 0)
-            continuation.resume();
+        if (--mRemainingCount == 0)
+            mParentHandle.resume();
     }
 
 private:
@@ -661,10 +705,14 @@ private:
     template <std::size_t I>
     void resume_one()
     {
-        auto& c      = std::get<I>(coros);
-        auto  handle = c.GetHandle();
-        handle.promise().SetParentAwaiter(this);
-        handle.resume();
+        auto& coro   = std::get<I>(mWaitedCoros);
+        auto  handle = coro.GetHandle();
+
+        auto& promise = handle.promise();
+        promise.SetScheduler(mParentHandle.promise().GetScheduler());
+        promise.SetParentAwaiter(this);
+
+        handle.resume(); // Kick off sub Coro<T>
     }
 
     template <std::size_t... Is>
@@ -673,23 +721,23 @@ private:
         (store_one<Is>(h), ...);
     }
 
-    template <std::size_t I>
+    template <std::size_t Index>
     void store_one(std::coroutine_handle<> h) noexcept
     {
-        using T       = std::tuple_element_t<I, std::tuple<Ts...>>;
-        using U       = Ret<T>;
-        using HandleT = typename Coro<T>::handle_type;
-        auto  done    = HandleT::from_address(h.address());
-        auto& c       = std::get<I>(coros);
-        if (done.address() == c.GetHandle().address())
+        using T         = std::tuple_element_t<Index, std::tuple<Ts...>>;
+        using StoreType = Ret<T>;
+        using HandleT   = typename Coro<T>::handle_type;
+        auto  done      = HandleT::from_address(h.address());
+        auto& coro      = std::get<Index>(mWaitedCoros);
+        if (done.address() == coro.GetHandle().address())
         {
             if constexpr (std::is_void_v<T>)
             {
-                std::get<I>(results) = std::monostate{};
+                std::get<Index>(mResults) = std::monostate{};
             }
             else
             {
-                std::get<I>(results) = std::move(done.promise().GetReturnValue());
+                std::get<Index>(mResults) = std::move(done.promise().GetReturnValue());
             }
         }
     }
@@ -701,13 +749,13 @@ private:
 template <typename... Ts>
 struct AnyAwaiter : CoroAwaiterBase
 {
-    std::tuple<Coro<Ts>...>               coros;
-    std::tuple<std::optional<Ret<Ts>>...> results;
-    std::atomic<bool>                     triggered{false};
-    std::coroutine_handle<>               continuation;
+    std::tuple<Coro<Ts>...>               mWaitedCoros;
+    std::tuple<std::optional<Ret<Ts>>...> mResults;
+    bool                                  mTriggered{false};
+    std::coroutine_handle<PromiseBase>    mParentHandle;
 
     AnyAwaiter(Coro<Ts>&&... cs)
-        : coros(std::move(cs)...), results()
+        : mWaitedCoros(std::move(cs)...), mResults()
     {
     }
 
@@ -716,23 +764,24 @@ struct AnyAwaiter : CoroAwaiterBase
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> h) noexcept
+    template <typename T>
+    void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
     {
-        continuation = h;
+        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
         resume_all(std::index_sequence_for<Ts...>{});
     }
 
     auto await_resume() noexcept
     {
-        return results;
+        return mResults;
     }
 
     void OnWaitComplete(std::coroutine_handle<> h) noexcept override
     {
-        if (!triggered.exchange(true))
+        if (!mTriggered)
         {
             store_result(h, std::index_sequence_for<Ts...>{});
-            continuation.resume();
+            mParentHandle.resume();
         }
     }
 
@@ -746,10 +795,14 @@ private:
     template <std::size_t I>
     void resume_one()
     {
-        auto& c      = std::get<I>(coros);
-        auto  handle = c.GetHandle();
-        handle.promise().SetParentAwaiter(this);
-        handle.resume();
+        auto& coro   = std::get<I>(mWaitedCoros);
+        auto  handle = coro.GetHandle();
+
+        auto& promise = handle.promise();
+        promise.SetScheduler(mParentHandle.promise().GetScheduler());
+        promise.SetParentAwaiter(this);
+
+        handle.resume(); // Kick off sub Coro<T>
     }
 
     template <std::size_t... Is>
@@ -765,16 +818,16 @@ private:
         using U       = Ret<T>;
         using HandleT = typename Coro<T>::handle_type;
         auto  done    = HandleT::from_address(h.address());
-        auto& c       = std::get<I>(coros);
+        auto& c       = std::get<I>(mWaitedCoros);
         if (done.address() == c.GetHandle().address())
         {
             if constexpr (std::is_void_v<T>)
             {
-                std::get<I>(results) = std::monostate{};
+                std::get<I>(mResults) = std::monostate{};
             }
             else
             {
-                std::get<I>(results) = std::move(done.promise().GetReturnValue());
+                std::get<I>(mResults) = std::move(done.promise().GetReturnValue());
             }
         }
     }
