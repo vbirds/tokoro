@@ -2,6 +2,8 @@
 #include <iostream>
 #include <thread>
 
+using namespace tokoro;
+
 std::ostream& operator<<(std::ostream& os, const std::monostate&)
 {
     return os << "void";
@@ -9,13 +11,13 @@ std::ostream& operator<<(std::ostream& os, const std::monostate&)
 
 Coro<int> DelayedValue(int value, double delaySeconds)
 {
-    co_await Scheduler::Wait(delaySeconds);
+    co_await Wait(delaySeconds);
     co_return value;
 }
 
 Coro<void> Delayed(double delaySeconds)
 {
-    co_await Scheduler::Wait(delaySeconds);
+    co_await Wait(delaySeconds);
     co_return;
 }
 
@@ -67,7 +69,7 @@ Coro<void> LongRunning()
     while (true)
     {
         std::cout << "LongRunning iteration " << i++ << std::endl;
-        co_await Scheduler::NextFrame();
+        co_await NextFrame();
     }
 }
 
@@ -113,19 +115,19 @@ int main()
     using namespace std::chrono_literals;
 
     // 1) All
-    auto h1 = Scheduler::Instance().Start(TestAll);
+    auto h1 = GlobalScheduler().Start(TestAll);
     // 2) Any
-    Scheduler::Instance().Start(TestAny);
+    GlobalScheduler().Start(TestAny);
     // 3) Long running + stop
-    auto h3 = Scheduler::Instance().Start(LongRunning);
+    auto h3 = GlobalScheduler().Start(LongRunning);
     // 4) Wait single coro
-    Scheduler::Instance().Start(TestWaitCoro);
+    GlobalScheduler().Start(TestWaitCoro);
     // 5) Get return
-    auto h5 = Scheduler::Instance().Start(DelayedValue, 99, 0.2);
+    auto h5 = GlobalScheduler().Start(DelayedValue, 99, 0.2);
 
     ValuePrinter printer(101);
-    Scheduler::Instance().Start([=]() -> Coro<void> {
-        co_await Scheduler::Instance().Wait(0.5);
+    GlobalScheduler().Start([=]() -> Coro<void> {
+        co_await Wait(0.5);
         printer.Print();
     });
 
@@ -143,7 +145,7 @@ int main()
             break;
         }
 
-        Scheduler::Instance().Update();
+        GlobalScheduler().Update();
         std::this_thread::sleep_for(33.3ms);
 
         frame++;

@@ -12,6 +12,9 @@
 #include <memory>
 #include <set>
 
+namespace tokoro
+{
+
 using Clock         = std::chrono::steady_clock;
 using TimePoint     = Clock::time_point;
 using ClockDuration = Clock::duration;
@@ -357,12 +360,12 @@ class TimeAwaiter;
 class Scheduler;
 
 template <typename T>
-class TaskHandle
+class CoroHandle
 {
 public:
-    TaskHandle(TaskHandle&& other);
-    TaskHandle(const TaskHandle& other) = delete;
-    ~TaskHandle();
+    CoroHandle(CoroHandle&& other);
+    CoroHandle(const CoroHandle& other) = delete;
+    ~CoroHandle();
 
     bool IsDown() const noexcept;
     void Stop() const noexcept;
@@ -373,7 +376,7 @@ public:
 private:
     friend Scheduler;
 
-    TaskHandle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
+    CoroHandle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
         : mId(id), mScheduler(scheduler), mSchedulerLiveSignal(liveSignal)
     {
     }
@@ -386,12 +389,6 @@ private:
 class Scheduler
 {
 public:
-    static Scheduler& Instance()
-    {
-        static Scheduler s;
-        return s;
-    }
-
     Scheduler()
     {
         mLiveSignal = std::make_shared<std::monostate>();
@@ -404,7 +401,7 @@ public:
     }
 
     template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
-    TaskHandle<RetType> Start(Task&& task, Args&&... args)
+    CoroHandle<RetType> Start(Task&& task, Args&&... args)
     {
         uint64_t id          = mNextId++;
         auto [iter, succeed] = mCoroutines.emplace(id, Entry());
@@ -428,7 +425,7 @@ public:
         // Kick off the coroutine.
         newCoro.Resume();
 
-        return TaskHandle<RetType>{id, this, mLiveSignal};
+        return CoroHandle<RetType>{id, this, mLiveSignal};
     }
 
     static TimeAwaiter NextFrame() noexcept;
@@ -439,7 +436,7 @@ public:
 
 private:
     friend TimeAwaiter;
-    friend TaskHandle;
+    friend CoroHandle;
     friend Coro;
     friend PromiseBase;
 
@@ -471,6 +468,12 @@ private:
     TimeQueue<TimeAwaiter*>             mExecuteQueue;
     std::shared_ptr<std::monostate>     mLiveSignal;
 };
+
+static Scheduler& GlobalScheduler()
+{
+    static Scheduler s;
+    return s;
+}
 
 class TimeAwaiter
 {
@@ -528,7 +531,7 @@ auto Coro<T>::operator co_await() noexcept
 }
 
 template <typename T>
-TaskHandle<T>::TaskHandle(TaskHandle&& other)
+CoroHandle<T>::CoroHandle(CoroHandle&& other)
     : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
 {
     other.mId                  = 0;
@@ -537,7 +540,7 @@ TaskHandle<T>::TaskHandle(TaskHandle&& other)
 }
 
 template <typename T>
-TaskHandle<T>::~TaskHandle()
+CoroHandle<T>::~CoroHandle()
 {
     if (mId != 0 && !mSchedulerLiveSignal.expired())
     {
@@ -546,20 +549,20 @@ TaskHandle<T>::~TaskHandle()
 }
 
 template <typename T>
-bool TaskHandle<T>::IsDown() const noexcept
+bool CoroHandle<T>::IsDown() const noexcept
 {
     return mSchedulerLiveSignal.expired() || mScheduler->IsDown(mId);
 }
 
 template <typename T>
-void TaskHandle<T>::Stop() const noexcept
+void CoroHandle<T>::Stop() const noexcept
 {
     if (!mSchedulerLiveSignal.expired())
         mScheduler->Stop(mId);
 }
 
 template <typename T>
-std::optional<T> TaskHandle<T>::GetReturn() const noexcept
+std::optional<T> CoroHandle<T>::GetReturn() const noexcept
     requires(!std::is_void_v<T>)
 {
     if (mSchedulerLiveSignal.expired())
@@ -567,12 +570,12 @@ std::optional<T> TaskHandle<T>::GetReturn() const noexcept
     return mScheduler->GetReturn<T>(mId);
 }
 
-inline TimeAwaiter Scheduler::NextFrame() noexcept
+TimeAwaiter NextFrame() noexcept
 {
     return TimeAwaiter();
 }
 
-inline TimeAwaiter Scheduler::Wait(double sec) noexcept
+TimeAwaiter Wait(double sec) noexcept
 {
     return TimeAwaiter(sec);
 }
@@ -852,3 +855,5 @@ auto Any(Coro<Ts>... coros)
 {
     return detail::AnyAwaiter<Ts...>(std::move(coros)...);
 }
+
+} // namespace tokoro

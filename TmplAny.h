@@ -6,6 +6,9 @@
 #include <typeindex>
 #include <utility>
 
+namespace tokoro
+{
+
 // Detect if a template template parameter is instantiable
 template <template <typename> class Tmpl, typename U, typename = void>
 struct is_instantiable : std::false_type
@@ -187,3 +190,5 @@ public:
         return *reinterpret_cast<const Tmpl<U>*>(storage_);
     }
 };
+
+} // namespace tokoro
