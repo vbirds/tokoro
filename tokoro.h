@@ -431,10 +431,12 @@ public:
     void Update();
 
 private:
-    friend TimeAwaiter;
-    friend CoroHandle;
-    friend Coro;
+    template <typename T>
+    friend class CoroHandle;
+    template <typename T>
+    friend class Coro;
     friend PromiseBase;
+    friend TimeAwaiter;
 
     void Release(uint64_t id);
     bool IsDown(uint64_t id);
