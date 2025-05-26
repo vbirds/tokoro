@@ -17,17 +17,6 @@ Coro<void> Delayed(double delaySeconds)
     co_return;
 }
 
-// Simple helper to drive a scheduler until a condition or max frames
-void RunSchedulerUntil(Scheduler& sched, std::function<bool()> done, int maxIterations = 1000000)
-{
-    int count = 0;
-    while (!done() && count++ < maxIterations)
-    {
-        sched.Update();
-    }
-    assert(done() && "Scheduler did not finish in time");
-}
-
 // Test awaiting a single coroutine with a return value
 void TestSingleAwaitValue()
 {
@@ -40,8 +29,12 @@ void TestSingleAwaitValue()
         completed = true;
     });
 
-    RunSchedulerUntil(sched, [&] { return completed; });
-    assert(completed);
+    // Drive scheduler until completed or timeout
+    for (int iter = 0; iter < 1000000 && !completed; ++iter)
+    {
+        sched.Update();
+    }
+    assert(completed && "Scheduler did not finish in time");
     assert(result == 42);
     assert(h.IsDown());
     std::cout << "TestSingleAwaitValue passed\n";
@@ -58,8 +51,12 @@ void TestSingleAwaitVoid()
         completed = true;
     });
 
-    RunSchedulerUntil(sched, [&] { return completed; });
-    assert(completed);
+    // Drive scheduler until completed or timeout
+    for (int iter = 0; iter < 1000000 && !completed; ++iter)
+    {
+        sched.Update();
+    }
+    assert(completed && "Scheduler did not finish in time");
     assert(h.IsDown());
     std::cout << "TestSingleAwaitVoid passed\n";
 }
@@ -79,8 +76,12 @@ void TestAllCombinator()
         completed = true;
     });
 
-    RunSchedulerUntil(sched, [&] { return completed; });
-    assert(completed);
+    // Drive scheduler until completed or timeout
+    for (int iter = 0; iter < 1000000 && !completed; ++iter)
+    {
+        sched.Update();
+    }
+    assert(completed && "Scheduler did not finish in time");
     assert(a == 1 && b == 2 && c == 3);
     assert(h.IsDown());
     std::cout << "TestAllCombinator passed\n";
@@ -102,8 +103,12 @@ void TestAnyCombinator()
         completed = true;
     });
 
-    RunSchedulerUntil(sched, [&] { return completed; });
-    assert(completed);
+    // Drive scheduler until completed or timeout
+    for (int iter = 0; iter < 1000000 && !completed; ++iter)
+    {
+        sched.Update();
+    }
+    assert(completed && "Scheduler did not finish in time");
     assert(!a.has_value() && b.has_value() && b.value() == 20);
     assert(h.IsDown());
     std::cout << "TestAnyCombinator passed\n";
@@ -143,7 +148,7 @@ void TestStress(size_t count, int fibN)
         handles[i].Stop();
     }
 
-    // Drive scheduler until remaining complete
+    // Drive scheduler until remaining complete or timeout
     auto done = [&]() {
         for (size_t i = 1; i < count; i += 2)
         {
@@ -152,7 +157,11 @@ void TestStress(size_t count, int fibN)
         }
         return true;
     };
-    RunSchedulerUntil(sched, done, 10000000);
+    for (int iter = 0; iter < 10000000 && !done(); ++iter)
+    {
+        sched.Update();
+    }
+    assert(done() && "Scheduler did not finish in time");
 
     // Verify results
     for (size_t i = 1; i < count; i += 2)
@@ -223,7 +232,8 @@ void TestGlobalScheduler()
         co_return 123;
     });
 
-    for (int i = 0; i < 10 && !handle.IsDown(); ++i)
+    // Drive global scheduler until done or timeout
+    for (int iter = 0; iter < 10 && !handle.IsDown(); ++iter)
     {
         GlobalScheduler().Update();
     }
@@ -241,8 +251,9 @@ int main()
     TestAnyCombinator();
     TestNextFrame();
     TestStop();
-    TestStress(10000, 10); // 配置压力测试数量和 Fibonacci 深度
     TestGlobalScheduler();
+
+    TestStress(10000, 10);
 
     std::cout << "All tests passed successfully." << std::endl;
     return 0;
