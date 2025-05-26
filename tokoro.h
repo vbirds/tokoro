@@ -428,10 +428,6 @@ public:
         return CoroHandle<RetType>{id, this, mLiveSignal};
     }
 
-    static TimeAwaiter NextFrame() noexcept;
-
-    static TimeAwaiter Wait(double sec) noexcept;
-
     void Update();
 
 private:
@@ -534,9 +530,9 @@ template <typename T>
 CoroHandle<T>::CoroHandle(CoroHandle&& other)
     : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
 {
-    other.mId                  = 0;
-    other.mScheduler           = nullptr;
-    other.mSchedulerLiveSignal = nullptr;
+    other.mId        = 0;
+    other.mScheduler = nullptr;
+    other.mSchedulerLiveSignal.reset();
 }
 
 template <typename T>

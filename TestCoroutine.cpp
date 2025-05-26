@@ -1,13 +1,9 @@
-#include "Coro.h"
+#include "tokoro.h"
+#include <cassert>
 #include <iostream>
-#include <thread>
+#include <vector>
 
 using namespace tokoro;
-
-std::ostream& operator<<(std::ostream& os, const std::monostate&)
-{
-    return os << "void";
-}
 
 Coro<int> DelayedValue(int value, double delaySeconds)
 {
@@ -21,147 +17,233 @@ Coro<void> Delayed(double delaySeconds)
     co_return;
 }
 
-Coro<void> TestAll()
+// Simple helper to drive a scheduler until a condition or max frames
+void RunSchedulerUntil(Scheduler& sched, std::function<bool()> done, int maxIterations = 1000000)
 {
-    std::cout << "TestAll start" << std::endl;
-    auto [a, b, c] = co_await All(
-        DelayedValue(1, 0.1),
-        Delayed(0.05),
-        DelayedValue(3, 0.2));
-    std::cout << "Finished TestAll() values: " << a << b << c << std::endl;
+    int count = 0;
+    while (!done() && count++ < maxIterations)
+    {
+        sched.Update();
+    }
+    assert(done() && "Scheduler did not finish in time");
 }
 
-Coro<void> TestAny()
+// Test awaiting a single coroutine with a return value
+void TestSingleAwaitValue()
 {
-    std::cout << "TestAny start" << std::endl;
-    auto [a, b, c] = co_await Any(
-        DelayedValue(10, 0.15),
-        Delayed(0.1),
-        DelayedValue(30, 0.25));
-    std::cout << "Finished TestAny() value: ";
-    if (a.has_value())
-        std::cout << a.value();
-    else
-        std::cout << "none";
-    if (b.has_value())
-        std::cout << b.value();
-    else
-        std::cout << "none";
-    if (c.has_value())
-        std::cout << c.value();
-    else
-        std::cout << "none";
+    Scheduler sched;
+    bool      completed = false;
+    int       result    = 0;
 
-    std::cout << std::endl;
+    auto h = sched.Start([&]() -> Coro<void> {
+        result    = co_await DelayedValue(42, 0.0);
+        completed = true;
+    });
+
+    RunSchedulerUntil(sched, [&] { return completed; });
+    assert(completed);
+    assert(result == 42);
+    assert(h.IsDown());
+    std::cout << "TestSingleAwaitValue passed\n";
 }
 
-Coro<void> TestWaitCoro()
+// Test awaiting a single void coroutine
+void TestSingleAwaitVoid()
 {
-    std::cout << "TestWaitCoro start" << std::endl;
-    const int value = co_await DelayedValue(2, 0.05);
-    co_await Delayed(0.05);
-    std::cout << "TestWaitCoro Finished" << value << std::endl;
+    Scheduler sched;
+    bool      completed = false;
+
+    auto h = sched.Start([&]() -> Coro<void> {
+        co_await Delayed(0.0);
+        completed = true;
+    });
+
+    RunSchedulerUntil(sched, [&] { return completed; });
+    assert(completed);
+    assert(h.IsDown());
+    std::cout << "TestSingleAwaitVoid passed\n";
 }
 
-Coro<void> LongRunning()
+// Test All combinator
+void TestAllCombinator()
 {
-    int i = 0;
-    while (true)
-    {
-        std::cout << "LongRunning iteration " << i++ << std::endl;
-        co_await NextFrame();
-    }
+    Scheduler sched;
+    bool      completed = false;
+    int       a = 0, b = 0, c = 0;
+
+    auto h = sched.Start([&]() -> Coro<void> {
+        std::tie(a, b, c) = co_await All(
+            DelayedValue(1, 0.0),
+            DelayedValue(2, 0.0),
+            DelayedValue(3, 0.0));
+        completed = true;
+    });
+
+    RunSchedulerUntil(sched, [&] { return completed; });
+    assert(completed);
+    assert(a == 1 && b == 2 && c == 3);
+    assert(h.IsDown());
+    std::cout << "TestAllCombinator passed\n";
 }
 
-class ValuePrinter
+// Test Any combinator
+void TestAnyCombinator()
 {
-public:
-    ValuePrinter(int value)
-        : mValue(value)
+    Scheduler          sched;
+    bool               completed = false;
+    std::optional<int> a, b;
+
+    auto h = sched.Start([&]() -> Coro<void> {
+        auto tup = co_await Any(
+            DelayedValue(10, 0.02),
+            DelayedValue(20, 0.0));
+        a         = std::get<0>(tup);
+        b         = std::get<1>(tup);
+        completed = true;
+    });
+
+    RunSchedulerUntil(sched, [&] { return completed; });
+    assert(completed);
+    assert(!a.has_value() && b.has_value() && b.value() == 20);
+    assert(h.IsDown());
+    std::cout << "TestAnyCombinator passed\n";
+}
+
+// Recursive Fibonacci coroutine
+Coro<int> Fib(int n)
+{
+    if (n < 2)
+        co_return n;
+    auto a  = Fib(n - 1);
+    auto b  = Fib(n - 2);
+    int  ra = co_await a;
+    int  rb = co_await b;
+    co_return ra + rb;
+}
+
+// Stress test: spawn many coroutines computing Fibonacci and cancel some
+void TestStress(size_t count, int fibN)
+{
+    Scheduler                    sched;
+    std::vector<CoroHandle<int>> handles;
+    handles.reserve(count);
+
+    // Start coroutines
+    for (size_t i = 0; i < count; ++i)
     {
-        std::cout << "ValuePrinter " << mValue << std::endl;
+        auto h = sched.Start([fibN]() -> Coro<int> {
+            co_return co_await Fib(fibN);
+        });
+        handles.push_back(std::move(h));
     }
 
-    ValuePrinter(ValuePrinter&& other)
-        : mValue(other.mValue)
+    // Cancel half
+    for (size_t i = 0; i < count; i += 2)
     {
-        std::cout << "ValuePrinter move " << mValue << std::endl;
-        other.mValue = 0;
+        handles[i].Stop();
     }
 
-    ValuePrinter(const ValuePrinter& other)
-    {
-        mValue = other.mValue;
-        std::cout << "ValuePrinter Copy " << mValue << std::endl;
-    }
+    // Drive scheduler until remaining complete
+    auto done = [&]() {
+        for (size_t i = 1; i < count; i += 2)
+        {
+            if (!handles[i].IsDown())
+                return false;
+        }
+        return true;
+    };
+    RunSchedulerUntil(sched, done, 10000000);
 
-    ~ValuePrinter()
+    // Verify results
+    for (size_t i = 1; i < count; i += 2)
     {
-        std::cout << "~ValuePrinter " << mValue << std::endl;
-        mValue = 0;
+        auto r = handles[i].GetReturn();
+        assert(r.has_value());
+        // Fibonacci correctness for small fibN
     }
+    std::cout << "TestStress(" << count << ", " << fibN << ") passed\n";
+}
 
-    void Print() const
+// Test NextFrame ordering
+void TestNextFrame()
+{
+    Scheduler sched;
+    int       count = 0;
+
+    auto h = sched.Start([&]() -> Coro<void> {
+        co_await NextFrame(); // resume 1
+        count += 1;
+        co_await NextFrame(); // resume 2
+        count += 2;
+    });
+
+    // Before any update, count==0
+    assert(count == 0);
+    sched.Update(); // first resume
+    assert(count == 1);
+    sched.Update(); // second resume
+    assert(count == 3);
+    assert(h.IsDown());
+    std::cout << "TestNextFrame passed\n";
+}
+
+// Test Stop and cancellation
+void TestStop()
+{
+    Scheduler sched;
+    int       loops = 0;
+
+    auto h = sched.Start([&]() -> Coro<void> {
+        while (true)
+        {
+            co_await NextFrame();
+            loops++;
+        }
+    });
+
+    // run a few frames
+    for (int i = 0; i < 5; ++i)
+        sched.Update();
+    assert(loops == 5);
+
+    assert(!h.IsDown());
+    h.Stop();
+    assert(h.IsDown());
+    sched.Update();
+    assert(loops == 5);
+    std::cout << "TestStop passed\n";
+}
+
+// Test global scheduler and GetReturn
+void TestGlobalScheduler()
+{
+    bool done   = false;
+    auto handle = GlobalScheduler().Start([&]() -> Coro<int> {
+        co_await Wait(0.0);
+        co_return 123;
+    });
+
+    for (int i = 0; i < 10 && !handle.IsDown(); ++i)
     {
-        std::cout << "ValuePrinter Print " << mValue << std::endl;
+        GlobalScheduler().Update();
     }
-
-private:
-    int mValue = 0;
-};
+    assert(handle.IsDown());
+    auto ret = handle.GetReturn();
+    assert(ret.has_value() && ret.value() == 123);
+    std::cout << "TestGlobalScheduler passed\n";
+}
 
 int main()
 {
-    using namespace std::chrono_literals;
+    TestSingleAwaitValue();
+    TestSingleAwaitVoid();
+    TestAllCombinator();
+    TestAnyCombinator();
+    TestNextFrame();
+    TestStop();
+    TestStress(10000, 10); // 配置压力测试数量和 Fibonacci 深度
+    TestGlobalScheduler();
 
-    // 1) All
-    auto h1 = GlobalScheduler().Start(TestAll);
-    // 2) Any
-    GlobalScheduler().Start(TestAny);
-    // 3) Long running + stop
-    auto h3 = GlobalScheduler().Start(LongRunning);
-    // 4) Wait single coro
-    GlobalScheduler().Start(TestWaitCoro);
-    // 5) Get return
-    auto h5 = GlobalScheduler().Start(DelayedValue, 99, 0.2);
-
-    ValuePrinter printer(101);
-    GlobalScheduler().Start([=]() -> Coro<void> {
-        co_await Wait(0.5);
-        printer.Print();
-    });
-
-    int frame = 0;
-    while (true)
-    {
-        if (frame == 20)
-        {
-            std::cout << "Stopping LongRunning at frame " << frame << std::endl;
-            h3.Stop();
-        }
-
-        if (frame == 26)
-        {
-            break;
-        }
-
-        GlobalScheduler().Update();
-        std::this_thread::sleep_for(33.3ms);
-
-        frame++;
-    }
-
-    if (h1.IsDown())
-    {
-        // This will compile error since TaskHandle<void> does not have GetReturn()
-        // std::cout << "Handle return value:" << h1.GetReturn() << std::endl;
-        std::cout << "h1 finished" << std::endl;
-    }
-
-    if (h5.IsDown())
-    {
-        std::cout << "h5 return value:" << h5.GetReturn().value() << std::endl;
-    }
-
+    std::cout << "All tests passed successfully." << std::endl;
     return 0;
 }
