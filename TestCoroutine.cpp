@@ -64,15 +64,17 @@ void TestSingleAwaitVoid()
 // Test All combinator
 void TestAllCombinator()
 {
-    Scheduler sched;
-    bool      completed = false;
-    int       a = 0, b = 0, c = 0;
+    Scheduler      sched;
+    bool           completed = false;
+    int            a = 0, b = 0, c = 0;
+    std::monostate d;
 
     auto h = sched.Start([&]() -> Coro<void> {
-        std::tie(a, b, c) = co_await All(
+        std::tie(a, b, c, d) = co_await All(
             DelayedValue(1, 0.0),
             DelayedValue(2, 0.0),
-            DelayedValue(3, 0.0));
+            DelayedValue(3, 0.0),
+            Delayed(0.0));
         completed = true;
     });
 
