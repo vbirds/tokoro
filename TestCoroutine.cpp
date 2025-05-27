@@ -95,11 +95,14 @@ void TestAnyCombinator()
     std::optional<int> a, b;
 
     auto h = sched.Start([&]() -> Coro<void> {
-        auto tup = co_await Any(
-            DelayedValue(10, 0.02),
-            DelayedValue(20, 0.0));
-        a         = std::get<0>(tup);
-        b         = std::get<1>(tup);
+        auto tup = co_await Any(DelayedValue(10, 10),
+                                DelayedValue(20, 0.0));
+
+        a = std::get<0>(tup);
+        b = std::get<1>(tup);
+
+        co_await Any(DelayedValue(10, 10), Delayed(0.000000000000000001));
+
         completed = true;
     });
 
