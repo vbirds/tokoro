@@ -259,6 +259,11 @@ private:
 public:
     using Iterator = typename SetType::const_iterator;
 
+    TimeQueue()
+    {
+        mUpdatePtr = mSet.end();
+    }
+
     void Clear()
     {
         mSet.clear();
