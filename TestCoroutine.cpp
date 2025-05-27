@@ -119,6 +119,9 @@ Coro<int> Fib(int n)
 {
     if (n < 2)
         co_return n;
+
+    co_await NextFrame();
+
     auto a  = Fib(n - 1);
     auto b  = Fib(n - 2);
     int  ra = co_await a;
