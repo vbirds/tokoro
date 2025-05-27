@@ -1,4 +1,4 @@
-﻿################################################################################
+################################################################################
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
 
@@ -11,3 +11,4 @@
 /TestCoroutine.vcxproj.filters
 /TestCoroutine.vcxproj.user
 /x64/Debug
+code_coverage_test/
