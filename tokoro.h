@@ -125,12 +125,6 @@ public:
 
     void return_void()
     {
-        this->mReturnValue = std::monostate{};
-    }
-
-    std::monostate GetReturnValue() const
-    {
-        return std::any_cast<std::monostate>(this->mReturnValue);
     }
 };
 
