@@ -5,13 +5,13 @@
 
 using namespace tokoro;
 
-Coro<int> DelayedValue(int value, double delaySeconds)
+Async<int> DelayedValue(int value, double delaySeconds)
 {
     co_await Wait(delaySeconds);
     co_return value;
 }
 
-Coro<void> Delayed(double delaySeconds)
+Async<void> Delayed(double delaySeconds)
 {
     co_await Wait(delaySeconds);
     co_return;
@@ -24,7 +24,7 @@ void TestSingleAwaitValue()
     bool      completed = false;
     int       result    = 0;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         result    = co_await DelayedValue(42, 0.0);
         completed = true;
     });
@@ -46,7 +46,7 @@ void TestSingleAwaitVoid()
     Scheduler sched;
     bool      completed = false;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         co_await Delayed(0.0);
         completed = true;
     });
@@ -69,7 +69,7 @@ void TestAllCombinator()
     int            a = 0, b = 0, c = 0;
     std::monostate d;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         std::tie(a, b, c, d) = co_await All(
             DelayedValue(1, 0.0),
             DelayedValue(2, 0.0),
@@ -96,7 +96,7 @@ void TestAnyCombinator()
     bool               completed = false;
     std::optional<int> a, b;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         auto tup = co_await Any(DelayedValue(10, 10),
                                 DelayedValue(20, 0.0));
 
@@ -120,7 +120,7 @@ void TestAnyCombinator()
 }
 
 // Recursive Fibonacci coroutine
-Coro<int> Fib(int n)
+Async<int> Fib(int n)
 {
     if (n < 2)
         co_return n;
@@ -137,14 +137,14 @@ Coro<int> Fib(int n)
 // Stress test: spawn many coroutines computing Fibonacci and cancel some
 void TestStress(size_t count, int fibN)
 {
-    Scheduler                    sched;
-    std::vector<CoroHandle<int>> handles;
+    Scheduler                sched;
+    std::vector<Handle<int>> handles;
     handles.reserve(count);
 
     // Start coroutines
     for (size_t i = 0; i < count; ++i)
     {
-        auto h = sched.Start([fibN]() -> Coro<int> {
+        auto h = sched.Start([fibN]() -> Async<int> {
             co_return co_await Fib(fibN);
         });
         handles.push_back(std::move(h));
@@ -187,7 +187,7 @@ void TestNextFrame()
     Scheduler sched;
     int       count = 0;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         co_await NextFrame(); // resume 1
         count += 1;
         co_await NextFrame(); // resume 2
@@ -210,7 +210,7 @@ void TestStop()
     Scheduler sched;
     int       loops = 0;
 
-    auto h = sched.Start([&]() -> Coro<void> {
+    auto h = sched.Start([&]() -> Async<void> {
         while (true)
         {
             co_await NextFrame();
@@ -235,7 +235,7 @@ void TestUseHandleAfterSchedulerDestroyed()
 {
     Scheduler* sched = new Scheduler();
 
-    auto handle = sched->Start([&]() -> Coro<int> {
+    auto handle = sched->Start([&]() -> Async<int> {
         co_await Wait(0.00000000001);
         co_return 123;
     });
@@ -255,10 +255,10 @@ void TestStartInCoroutine()
     Scheduler sched;
     int       frame = 0;
 
-    sched.Start([&]() -> Coro<void> {
+    sched.Start([&]() -> Async<void> {
         co_await NextFrame();
 
-        auto innerCoro = [&]() -> Coro<void> {
+        auto innerCoro = [&]() -> Async<void> {
             co_await NextFrame();
             // Inner coroutine should always resume in next frame
             assert(frame == 1);
@@ -274,7 +274,7 @@ void TestStartInCoroutine()
     });
 
     // One more outer coro to make sure the first update won't exceed immediately.
-    sched.Start([&]() -> Coro<void> {
+    sched.Start([&]() -> Async<void> {
         co_await NextFrame();
         assert(frame == 0);
     });
@@ -290,7 +290,7 @@ void TestStartInCoroutine()
 // Test global scheduler and GetReturn
 void TestGlobalScheduler()
 {
-    auto handle = GlobalScheduler().Start([&]() -> Coro<int> {
+    auto handle = GlobalScheduler().Start([&]() -> Async<int> {
         co_await Wait(0.0);
         co_return 123;
     });

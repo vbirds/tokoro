@@ -129,25 +129,25 @@ public:
 };
 
 template <typename T>
-class Coro
+class Async
 {
 public:
     using promise_type = Promise<T>;
     using value_type   = T;
     using handle_type  = std::coroutine_handle<promise_type>;
 
-    Coro(handle_type h)
+    Async(handle_type h)
         : mHandle(h)
     {
     }
 
-    Coro(Coro&& o)
+    Async(Async&& o)
         : mHandle(o.mHandle)
     {
         o.mHandle = nullptr;
     }
 
-    ~Coro()
+    ~Async()
     {
         if (mHandle)
             mHandle.destroy();
@@ -359,12 +359,12 @@ class TimeAwaiter;
 class Scheduler;
 
 template <typename T>
-class CoroHandle
+class Handle
 {
 public:
-    CoroHandle(CoroHandle&& other);
-    CoroHandle(const CoroHandle& other) = delete;
-    ~CoroHandle();
+    Handle(Handle&& other);
+    Handle(const Handle& other) = delete;
+    ~Handle();
 
     bool IsDown() const noexcept;
     void Stop() const noexcept;
@@ -375,7 +375,7 @@ public:
 private:
     friend Scheduler;
 
-    CoroHandle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
+    Handle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
         : mId(id), mScheduler(scheduler), mSchedulerLiveSignal(liveSignal)
     {
     }
@@ -400,7 +400,7 @@ public:
     }
 
     template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
-    CoroHandle<RetType> Start(Task&& task, Args&&... args)
+    Handle<RetType> Start(Task&& task, Args&&... args)
     {
         uint64_t id          = mNextId++;
         auto [iter, succeed] = mCoroutines.emplace(id, Entry());
@@ -424,16 +424,16 @@ public:
         // Kick off the coroutine.
         newCoro.Resume();
 
-        return CoroHandle<RetType>{id, this, mLiveSignal};
+        return Handle<RetType>{id, this, mLiveSignal};
     }
 
     void Update();
 
 private:
     template <typename T>
-    friend class CoroHandle;
+    friend class Handle;
     template <typename T>
-    friend class Coro;
+    friend class Async;
     friend PromiseBase;
     friend TimeAwaiter;
 
@@ -453,11 +453,11 @@ private:
 
     struct Entry
     {
-        TmplAny<Coro>                  coro;
-        std::function<TmplAny<Coro>()> lambda;
-        bool                           finished = false;
-        bool                           released = false;
-        std::any                       returnValue;
+        TmplAny<Async>                  coro;
+        std::function<TmplAny<Async>()> lambda;
+        bool                            finished = false;
+        bool                            released = false;
+        std::any                        returnValue;
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
@@ -522,13 +522,13 @@ private:
 };
 
 template <typename T>
-auto Coro<T>::operator co_await() noexcept
+auto Async<T>::operator co_await() noexcept
 {
     return SingleCoroAwaiter(GetHandle());
 }
 
 template <typename T>
-CoroHandle<T>::CoroHandle(CoroHandle&& other)
+Handle<T>::Handle(Handle&& other)
     : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
 {
     other.mId        = 0;
@@ -537,7 +537,7 @@ CoroHandle<T>::CoroHandle(CoroHandle&& other)
 }
 
 template <typename T>
-CoroHandle<T>::~CoroHandle()
+Handle<T>::~Handle()
 {
     if (mId != 0 && !mSchedulerLiveSignal.expired())
     {
@@ -546,20 +546,20 @@ CoroHandle<T>::~CoroHandle()
 }
 
 template <typename T>
-bool CoroHandle<T>::IsDown() const noexcept
+bool Handle<T>::IsDown() const noexcept
 {
     return mSchedulerLiveSignal.expired() || mScheduler->IsDown(mId);
 }
 
 template <typename T>
-void CoroHandle<T>::Stop() const noexcept
+void Handle<T>::Stop() const noexcept
 {
     if (!mSchedulerLiveSignal.expired())
         mScheduler->Stop(mId);
 }
 
 template <typename T>
-std::optional<T> CoroHandle<T>::GetReturn() const noexcept
+std::optional<T> Handle<T>::GetReturn() const noexcept
     requires(!std::is_void_v<T>)
 {
     if (mSchedulerLiveSignal.expired())
@@ -661,12 +661,12 @@ using Ret = std::conditional_t<std::is_void_v<T>, std::monostate, T>;
 template <typename... Ts>
 struct AllAwaiter : CoroAwaiterBase
 {
-    std::tuple<Coro<Ts>...>            mWaitedCoros;
+    std::tuple<Async<Ts>...>           mWaitedCoros;
     std::tuple<Ret<Ts>...>             mResults;
     std::size_t                        mRemainingCount;
     std::coroutine_handle<PromiseBase> mParentHandle;
 
-    AllAwaiter(Coro<Ts>&&... cs)
+    AllAwaiter(Async<Ts>&&... cs)
         : mWaitedCoros(std::move(cs)...), mRemainingCount(sizeof...(Ts))
     {
     }
@@ -725,7 +725,7 @@ private:
     void store_one(std::coroutine_handle<> h) noexcept
     {
         using T       = std::tuple_element_t<Index, std::tuple<Ts...>>;
-        using HandleT = typename Coro<T>::handle_type;
+        using HandleT = typename Async<T>::handle_type;
         auto  done    = HandleT::from_address(h.address());
         auto& coro    = std::get<Index>(mWaitedCoros);
         if (done.address() == coro.GetHandle().address())
@@ -748,12 +748,12 @@ private:
 template <typename... Ts>
 struct AnyAwaiter : CoroAwaiterBase
 {
-    std::tuple<Coro<Ts>...>               mWaitedCoros;
+    std::tuple<Async<Ts>...>              mWaitedCoros;
     std::tuple<std::optional<Ret<Ts>>...> mResults;
     bool                                  mTriggered{false};
     std::coroutine_handle<PromiseBase>    mParentHandle;
 
-    AnyAwaiter(Coro<Ts>&&... cs)
+    AnyAwaiter(Async<Ts>&&... cs)
         : mWaitedCoros(std::move(cs)...), mResults()
     {
     }
@@ -814,7 +814,7 @@ private:
     void store_one(std::coroutine_handle<> h) noexcept
     {
         using T       = std::tuple_element_t<I, std::tuple<Ts...>>;
-        using HandleT = typename Coro<T>::handle_type;
+        using HandleT = typename Async<T>::handle_type;
         auto  done    = HandleT::from_address(h.address());
         auto& coro    = std::get<I>(mWaitedCoros);
         if (done.address() == coro.GetHandle().address())
@@ -839,14 +839,14 @@ private:
 
 // All: returns tuple<Ret<Ts>...>
 template <typename... Ts>
-auto All(Coro<Ts>... coros)
+auto All(Async<Ts>... coros)
 {
     return detail::AllAwaiter<Ts...>(std::move(coros)...);
 }
 
 // Any: returns tuple<optional<Ret<Ts>>...>
 template <typename... Ts>
-auto Any(Coro<Ts>... coros)
+auto Any(Async<Ts>... coros)
 {
     return detail::AnyAwaiter<Ts...>(std::move(coros)...);
 }
