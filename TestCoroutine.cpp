@@ -231,10 +231,65 @@ void TestStop()
     std::cout << "TestStop passed\n";
 }
 
+void TestUseHandleAfterSchedulerDestroyed()
+{
+    Scheduler* sched = new Scheduler();
+
+    auto handle = sched->Start([&]() -> Coro<int> {
+        co_await Wait(0.00000000001);
+        co_return 123;
+    });
+
+    for (int iter = 0; iter < 1000000000 && !handle.IsDown(); ++iter)
+    {
+        sched->Update();
+    }
+
+    delete sched;
+    assert(!handle.GetReturn().has_value());
+    std::cout << "TestUseHandleAfterSchedulerDestroyed passed\n";
+}
+
+void TestStartInCoroutine()
+{
+    Scheduler sched;
+    int       frame = 0;
+
+    sched.Start([&]() -> Coro<void> {
+        co_await NextFrame();
+
+        auto innerCoro = [&]() -> Coro<void> {
+            co_await NextFrame();
+            // Inner coroutine should always resume in next frame
+            assert(frame == 1);
+        };
+
+        // Star more than 2 to make sure some inner coros insert after outer coros
+        sched.Start(innerCoro);
+        sched.Start(innerCoro);
+        sched.Start(innerCoro);
+        sched.Start(innerCoro);
+
+        assert(frame == 0);
+    });
+
+    // One more outer coro to make sure the first update won't exceed immediately.
+    sched.Start([&]() -> Coro<void> {
+        co_await NextFrame();
+        assert(frame == 0);
+    });
+
+    for (; frame < 5; ++frame)
+    {
+        sched.Update();
+    }
+
+    std::cout << "TestStartInCoroutine passed\n";
+}
+
 // Test global scheduler and GetReturn
 void TestGlobalScheduler()
 {
-    bool done   = false;
     auto handle = GlobalScheduler().Start([&]() -> Coro<int> {
         co_await Wait(0.0);
         co_return 123;
@@ -259,6 +314,8 @@ int main()
     TestAnyCombinator();
     TestNextFrame();
     TestStop();
+    TestUseHandleAfterSchedulerDestroyed();
+    TestStartInCoroutine();
     TestGlobalScheduler();
 
     TestStress(10000, 10);
