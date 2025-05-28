@@ -815,7 +815,6 @@ private:
     void store_one(std::coroutine_handle<> h) noexcept
     {
         using T       = std::tuple_element_t<I, std::tuple<Ts...>>;
-        using U       = Ret<T>;
         using HandleT = typename Coro<T>::handle_type;
         auto  done    = HandleT::from_address(h.address());
         auto& c       = std::get<I>(mWaitedCoros);
