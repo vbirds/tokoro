@@ -724,11 +724,10 @@ private:
     template <std::size_t Index>
     void store_one(std::coroutine_handle<> h) noexcept
     {
-        using T         = std::tuple_element_t<Index, std::tuple<Ts...>>;
-        using StoreType = Ret<T>;
-        using HandleT   = typename Coro<T>::handle_type;
-        auto  done      = HandleT::from_address(h.address());
-        auto& coro      = std::get<Index>(mWaitedCoros);
+        using T       = std::tuple_element_t<Index, std::tuple<Ts...>>;
+        using HandleT = typename Coro<T>::handle_type;
+        auto  done    = HandleT::from_address(h.address());
+        auto& coro    = std::get<Index>(mWaitedCoros);
         if (done.address() == coro.GetHandle().address())
         {
             if constexpr (std::is_void_v<T>)
@@ -817,8 +816,8 @@ private:
         using T       = std::tuple_element_t<I, std::tuple<Ts...>>;
         using HandleT = typename Coro<T>::handle_type;
         auto  done    = HandleT::from_address(h.address());
-        auto& c       = std::get<I>(mWaitedCoros);
-        if (done.address() == c.GetHandle().address())
+        auto& coro    = std::get<I>(mWaitedCoros);
+        if (done.address() == coro.GetHandle().address())
         {
             if constexpr (std::is_void_v<T>)
             {
