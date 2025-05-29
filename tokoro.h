@@ -360,6 +360,15 @@ private:
     std::weak_ptr<std::monostate> mSchedulerLiveSignal;
 };
 
+namespace internal
+{
+template <typename... Ts>
+struct AnyAwaiter;
+
+template <typename... Ts>
+struct AllAwaiter;
+} // namespace internal
+
 template <typename T>
 class Async
 {
@@ -387,6 +396,15 @@ public:
 
     auto operator co_await() noexcept;
 
+private:
+    template <typename U>
+    friend class Handle;
+    friend class Scheduler;
+    template <typename... Ts>
+    friend struct internal::AllAwaiter;
+    template <typename... Ts>
+    friend struct internal::AnyAwaiter;
+
     void SetId(uint64_t id)
     {
         GetHandle().promise().SetId(id);
@@ -407,7 +425,6 @@ public:
         mHandle.resume();
     }
 
-private:
     std::coroutine_handle<> mHandle;
 };
 
