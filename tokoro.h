@@ -1,311 +1,23 @@
 #pragma once
 
+#include "defines.h"
+#include "promise.h"
+#include "singleawaiter.h"
+#include "timequeue.h"
 #include "tmplany.h"
 
 #include <any>
 #include <assert.h>
 #include <atomic>
 #include <cassert>
-#include <chrono>
 #include <coroutine>
 #include <functional>
 #include <memory>
-#include <set>
 
 namespace tokoro
 {
 
-class Scheduler;
-
-namespace internal
-{
-
-using Clock         = std::chrono::steady_clock;
-using TimePoint     = Clock::time_point;
-using ClockDuration = Clock::duration;
-
-struct CoroAwaiterBase
-{
-    virtual void OnWaitComplete(std::coroutine_handle<>) noexcept = 0;
-    virtual ~CoroAwaiterBase()                                    = default;
-};
-
-class PromiseBase
-{
-public:
-    std::suspend_always initial_suspend() noexcept
-    {
-        return {};
-    }
-
-    struct FinalAwaiter
-    {
-        bool await_ready() const noexcept
-        {
-            return false;
-        }
-        void await_suspend(std::coroutine_handle<> h) const noexcept;
-
-        void await_resume() const noexcept
-        {
-        }
-    };
-
-    auto final_suspend() noexcept
-    {
-        return FinalAwaiter{};
-    }
-
-    void unhandled_exception()
-    {
-        std::terminate();
-    }
-
-    void SetId(uint64_t id)
-    {
-        mId = id;
-    }
-
-    void SetScheduler(Scheduler* scheduler)
-    {
-        mScheduler = scheduler;
-    }
-
-    Scheduler* GetScheduler() const
-    {
-        return mScheduler;
-    }
-
-    void SetParentAwaiter(CoroAwaiterBase* awaiter)
-    {
-        mParentAwaiter = awaiter;
-    }
-
-protected:
-    std::any         mReturnValue;
-    uint64_t         mId            = 0;
-    CoroAwaiterBase* mParentAwaiter = nullptr;
-    Scheduler*       mScheduler     = nullptr;
-};
-
-template <typename T>
-class Promise : public PromiseBase
-{
-public:
-    using Handle = std::coroutine_handle<Promise<T>>;
-
-    auto get_return_object() noexcept
-    {
-        return Handle::from_promise(*this);
-    }
-
-    void return_value(T&& val)
-    {
-        this->mReturnValue = std::forward<T>(val);
-    }
-
-    void return_value(const T& val)
-    {
-        this->mReturnValue = val;
-    }
-
-    T& GetReturnValue()
-    {
-        return *std::any_cast<T>(&this->mReturnValue);
-    }
-};
-
-template <>
-class Promise<void> : public PromiseBase
-{
-public:
-    using Handle = std::coroutine_handle<Promise<void>>;
-
-    auto get_return_object() noexcept
-    {
-        return Handle::from_promise(*this);
-    }
-
-    void return_void()
-    {
-    }
-};
-
-template <typename T>
-class SingleCoroAwaiter : public CoroAwaiterBase
-{
-public:
-    SingleCoroAwaiter(std::coroutine_handle<Promise<T>> handle)
-        : mWaitedHandle(handle)
-    {
-    }
-
-    bool await_ready() const noexcept
-    {
-        return false;
-    }
-
-    template <typename U>
-    void await_suspend(std::coroutine_handle<Promise<U>> handle) noexcept
-    {
-        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(handle.address());
-
-        auto& promise = mWaitedHandle.promise();
-        promise.SetScheduler(mParentHandle.promise().GetScheduler());
-        promise.SetParentAwaiter(this);
-
-        mWaitedHandle.resume(); // Kick off child Coro<T>
-    }
-
-    auto await_resume() const noexcept
-        requires(!std::is_void_v<T>)
-    {
-        return mWaitedHandle.promise().GetReturnValue();
-    }
-
-    void await_resume() const noexcept
-        requires(std::is_void_v<T>)
-    {
-    }
-
-    void OnWaitComplete(std::coroutine_handle<> /*unused*/) noexcept override
-    {
-        mParentHandle.resume();
-    }
-
-private:
-    std::coroutine_handle<Promise<T>>  mWaitedHandle;
-    std::coroutine_handle<PromiseBase> mParentHandle;
-};
-
-template <typename T>
-class TimeQueue
-{
-private:
-    struct Node
-    {
-        TimePoint time;
-        uint32_t  seq;
-        uint32_t  frame;
-        T         value;
-    };
-
-    struct Comp
-    {
-        bool operator()(const Node& a, const Node& b) const noexcept
-        {
-            if (a.time != b.time)
-                return a.time < b.time;
-            return a.seq < b.seq;
-        }
-    };
-
-    using SetType = std::multiset<Node, Comp>;
-
-public:
-    using Iterator = typename SetType::const_iterator;
-
-    TimeQueue()
-    {
-        mUpdatePtr = mSet.end();
-    }
-
-    void Clear()
-    {
-        mSet.clear();
-        mAddOrder   = 0;
-        mAddFrame   = 0;
-        mUpdatePtr  = mSet.end();
-        mCurExeTime = TimePoint::min();
-    }
-
-    Iterator Add(const T& e)
-    {
-        return AddImpl(TimePoint::min(), e);
-    }
-
-    Iterator AddTimed(const TimePoint& time, const T& e)
-    {
-        return AddImpl(time, e);
-    }
-
-    void Remove(Iterator iter)
-    {
-        if (iter == mUpdatePtr)
-        {
-            mUpdatePtr = mSet.erase(mUpdatePtr);
-            MoveToNext();
-        }
-        else
-        {
-            mSet.erase(iter);
-        }
-    }
-
-    std::optional<T> Pop()
-    {
-        if (mUpdatePtr == mSet.end())
-            return std::nullopt;
-
-        T ret = std::move(mUpdatePtr->value);
-
-        mUpdatePtr = mSet.erase(mUpdatePtr);
-        MoveToNext();
-
-        return ret;
-    }
-
-    bool UpdateEnded() const noexcept
-    {
-        return mSet.empty() || mSet.end() == mUpdatePtr;
-    }
-
-    void SetupUpdate(TimePoint exeTime)
-    {
-        mAddFrame++;
-        mAddOrder   = 0;
-        mUpdatePtr  = mSet.begin();
-        mCurExeTime = exeTime;
-
-        MoveToNext();
-    }
-
-private:
-    void MoveToNext()
-    {
-        while (mUpdatePtr != mSet.end())
-        {
-            const Node& node = *mUpdatePtr;
-
-            if (node.time > mCurExeTime)
-            {
-                mUpdatePtr = mSet.end();
-                break;
-            }
-
-            if (node.frame == mAddFrame)
-            {
-                ++mUpdatePtr;
-            }
-            else
-            {
-                break;
-            }
-        }
-    }
-
-    Iterator AddImpl(const TimePoint& time, const T& e)
-    {
-        Node node{time, mAddOrder++, mAddFrame, e};
-        return mSet.insert(std::move(node));
-    }
-
-    SetType   mSet;
-    uint32_t  mAddOrder = 0;
-    uint32_t  mAddFrame = 0;
-    Iterator  mUpdatePtr;
-    TimePoint mCurExeTime;
-};
+using namespace internal;
 
 class TimeAwaiter
 {
@@ -330,8 +42,6 @@ private:
     TimePoint                                        mWhen;
     std::coroutine_handle<PromiseBase>               mHandle = nullptr;
 };
-
-} // namespace internal
 
 template <typename T>
 class Handle
@@ -360,20 +70,17 @@ private:
     std::weak_ptr<std::monostate> mSchedulerLiveSignal;
 };
 
-namespace internal
-{
 template <typename... Ts>
 struct AnyAwaiter;
 
 template <typename... Ts>
 struct AllAwaiter;
-} // namespace internal
 
 template <typename T>
 class Async
 {
 public:
-    using promise_type = internal::Promise<T>;
+    using promise_type = Promise<T>;
     using value_type   = T;
     using handle_type  = std::coroutine_handle<promise_type>;
 
@@ -394,16 +101,19 @@ public:
             mHandle.destroy();
     }
 
-    auto operator co_await() noexcept;
+    auto operator co_await() noexcept
+    {
+        return SingleCoroAwaiter(GetHandle());
+    }
 
 private:
     template <typename U>
     friend class Handle;
     friend class Scheduler;
     template <typename... Ts>
-    friend struct internal::AllAwaiter;
+    friend struct AllAwaiter;
     template <typename... Ts>
-    friend struct internal::AnyAwaiter;
+    friend struct AnyAwaiter;
 
     void SetId(uint64_t id)
     {
@@ -477,8 +187,8 @@ private:
     friend class Handle;
     template <typename T>
     friend class Async;
-    friend internal::PromiseBase;
-    friend internal::TimeAwaiter;
+    friend PromiseBase;
+    friend TimeAwaiter;
 
     void Release(uint64_t id);
     bool IsDown(uint64_t id);
@@ -503,29 +213,17 @@ private:
         std::any                        returnValue;
     };
 
-    std::unordered_map<uint64_t, Entry>         mCoroutines;
-    std::atomic<uint64_t>                       mNextId{1};
-    internal::TimeQueue<internal::TimeAwaiter*> mExecuteQueue;
-    std::shared_ptr<std::monostate>             mLiveSignal;
+    std::unordered_map<uint64_t, Entry> mCoroutines;
+    std::atomic<uint64_t>               mNextId{1};
+    TimeQueue<TimeAwaiter*>             mExecuteQueue;
+    std::shared_ptr<std::monostate>     mLiveSignal;
 };
 
-static Scheduler& GlobalScheduler()
-{
-    static Scheduler s;
-    return s;
-}
-
 template <typename T>
-void internal::TimeAwaiter::await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
+void TimeAwaiter::await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
 {
     mHandle  = std::coroutine_handle<PromiseBase>::from_address(handle.address());
     mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
-}
-
-template <typename T>
-auto Async<T>::operator co_await() noexcept
-{
-    return internal::SingleCoroAwaiter(GetHandle());
 }
 
 template <typename T>
@@ -568,31 +266,31 @@ std::optional<T> Handle<T>::GetReturn() const noexcept
     return mScheduler->GetReturn<T>(mId);
 }
 
-inline internal::TimeAwaiter::TimeAwaiter(double sec)
+inline TimeAwaiter::TimeAwaiter(double sec)
     : mWhen(Clock::now() + std::chrono::duration_cast<ClockDuration>(std::chrono::duration<double>(sec)))
 {
 }
 
-inline internal::TimeAwaiter::TimeAwaiter() : mWhen(TimePoint::min())
+inline TimeAwaiter::TimeAwaiter() : mWhen(TimePoint::min())
 {
 }
 
-inline internal::TimeAwaiter::~TimeAwaiter()
+inline TimeAwaiter::~TimeAwaiter()
 {
     if (mExeIter.has_value())
         mHandle.promise().GetScheduler()->mExecuteQueue.Remove(*mExeIter);
 }
 
-inline bool internal::TimeAwaiter::await_ready() const noexcept
+inline bool TimeAwaiter::await_ready() const noexcept
 {
     return false;
 }
 
-inline void internal::TimeAwaiter::await_resume() const noexcept
+inline void TimeAwaiter::await_resume() const noexcept
 {
 }
 
-inline void internal::TimeAwaiter::Resume()
+inline void TimeAwaiter::Resume()
 {
     assert(mHandle && !mHandle.done() && mExeIter.has_value());
     // mExeIter has been removed from mExecuteQueue before enter Resume().
@@ -602,7 +300,7 @@ inline void internal::TimeAwaiter::Resume()
 
 inline void Scheduler::Update()
 {
-    mExecuteQueue.SetupUpdate(internal::Clock::now());
+    mExecuteQueue.SetupUpdate(Clock::now());
 
     while (!mExecuteQueue.UpdateEnded())
     {
@@ -649,38 +347,7 @@ std::optional<T> Scheduler::GetReturn(uint64_t id)
     return std::any_cast<T>(mCoroutines[id].returnValue);
 }
 
-void internal::PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
-{
-    auto             handle        = std::coroutine_handle<PromiseBase>::from_address(h.address());
-    auto&            promise       = handle.promise();
-    const uint64_t   coroId        = promise.mId;
-    CoroAwaiterBase* parentAwaiter = promise.mParentAwaiter;
-
-    // Can't have awaiter and coroId both.
-    assert(parentAwaiter == nullptr || coroId == 0);
-
-    if (parentAwaiter != nullptr)
-    {
-        parentAwaiter->OnWaitComplete(h);
-    }
-    else if (coroId != 0)
-    {
-        promise.GetScheduler()->OnCoroutineFinished(coroId, std::move(promise.mReturnValue));
-    }
-}
-
-// ¡ª¡ª All & Any ¡ª¡ª
-
-namespace internal
-{
-
-// map void to monostate
-template <typename T>
-using RetConvert = std::conditional_t<std::is_void_v<T>, std::monostate, T>;
-
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Awaiter for All: waits all, returns tuple<Ret<Ts>...>
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+//  Awaiter for All: waits all, returns tuple<Ts>...>
 template <typename... Ts>
 struct AllAwaiter : CoroAwaiterBase
 {
@@ -765,9 +432,7 @@ private:
     }
 };
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Awaiter for Any: waits first, returns tuple<optional<Ret<Ts>>...>
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+//  Awaiter for Any: waits first, returns tuple<optional<Ts>...>
 template <typename... Ts>
 struct AnyAwaiter : CoroAwaiterBase
 {
@@ -854,30 +519,36 @@ private:
     }
 };
 
-} // namespace internal
-
 // All: returns tuple<Ts...>
 template <typename... Ts>
 auto All(Async<Ts>... coros)
 {
-    return internal::AllAwaiter<Ts...>(std::move(coros)...);
+    return AllAwaiter<Ts...>(std::move(coros)...);
 }
 
 // Any: returns tuple<optional<Ts>...>
 template <typename... Ts>
 auto Any(Async<Ts>... coros)
 {
-    return internal::AnyAwaiter<Ts...>(std::move(coros)...);
+    return AnyAwaiter<Ts...>(std::move(coros)...);
 }
 
-internal::TimeAwaiter NextFrame() noexcept
+TimeAwaiter NextFrame() noexcept
 {
-    return internal::TimeAwaiter();
+    return TimeAwaiter();
 }
 
-internal::TimeAwaiter Wait(double sec) noexcept
+TimeAwaiter Wait(double sec) noexcept
 {
-    return internal::TimeAwaiter(sec);
+    return TimeAwaiter(sec);
 }
+
+static Scheduler& GlobalScheduler()
+{
+    static Scheduler s;
+    return s;
+}
+
+#include "promise.inl"
 
 } // namespace tokoro
