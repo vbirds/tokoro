@@ -348,13 +348,15 @@ std::optional<T> Scheduler::GetReturn(uint64_t id)
 //  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
 //
 template <typename... Ts>
-struct AllAwaiter : CoroAwaiterBase
+class AllAwaiter : CoroAwaiterBase
 {
+private:
     std::tuple<Async<Ts>...>           mWaitedCoros;
     std::tuple<RetConvert<Ts>...>      mResults;
     std::size_t                        mRemainingCount;
     std::coroutine_handle<PromiseBase> mParentHandle;
 
+public:
     AllAwaiter(Async<Ts>&&... cs)
         : mWaitedCoros(std::move(cs)...), mRemainingCount(sizeof...(Ts))
     {
@@ -434,13 +436,15 @@ private:
 //  Awaiter for Any: waits first, returns tuple<optional<T1>, optional<T2>, optional<T2>...>
 //
 template <typename... Ts>
-struct AnyAwaiter : CoroAwaiterBase
+class AnyAwaiter : CoroAwaiterBase
 {
+private:
     std::tuple<Async<Ts>...>                     mWaitedCoros;
     std::tuple<std::optional<RetConvert<Ts>>...> mResults;
     bool                                         mTriggered{false};
     std::coroutine_handle<PromiseBase>           mParentHandle;
 
+public:
     AnyAwaiter(Async<Ts>&&... cs)
         : mWaitedCoros(std::move(cs)...), mResults()
     {
