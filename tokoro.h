@@ -180,7 +180,15 @@ public:
         return Handle<RetType>{id, this, mLiveSignal};
     }
 
-    void Update();
+    void Update()
+    {
+        mExecuteQueue.SetupUpdate(Clock::now());
+
+        while (!mExecuteQueue.UpdateEnded())
+        {
+            mExecuteQueue.Pop().value()->Resume();
+        }
+    }
 
 private:
     template <typename T>
@@ -190,9 +198,38 @@ private:
     friend PromiseBase;
     friend TimeAwaiter;
 
-    void Release(uint64_t id);
-    bool IsDown(uint64_t id);
-    void Stop(uint64_t id);
+    void Release(uint64_t id)
+    {
+        auto it = mCoroutines.find(id);
+        assert(it != mCoroutines.end() && !it->second.released);
+
+        it->second.released = true;
+        if (it->second.released && it->second.finished)
+            mCoroutines.erase(it);
+    }
+
+    bool IsDown(uint64_t id)
+    {
+        const auto it = mCoroutines.find(id);
+        assert(it != mCoroutines.end());
+        return it->second.finished;
+    }
+
+    void Stop(uint64_t id)
+    {
+        const auto it = mCoroutines.find(id);
+        assert(it != mCoroutines.end());
+
+        if (!it->second.finished)
+        {
+            it->second.finished = true;
+            it->second.coro.Reset();
+            it->second.lambda = {};
+
+            if (it->second.released && it->second.finished)
+                mCoroutines.erase(it);
+        }
+    }
 
     template <typename T>
     std::optional<T> GetReturn(uint64_t id);
@@ -219,13 +256,8 @@ private:
     std::shared_ptr<std::monostate>     mLiveSignal;
 };
 
-template <typename T>
-void TimeAwaiter::await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
-{
-    mHandle  = std::coroutine_handle<PromiseBase>::from_address(handle.address());
-    mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
-}
-
+// Handle functions
+//
 template <typename T>
 Handle<T>::Handle(Handle&& other)
     : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
@@ -266,6 +298,15 @@ std::optional<T> Handle<T>::GetReturn() const noexcept
     return mScheduler->GetReturn<T>(mId);
 }
 
+// TimeAwaiter functions
+//
+template <typename T>
+void TimeAwaiter::await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
+{
+    mHandle  = std::coroutine_handle<PromiseBase>::from_address(handle.address());
+    mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
+}
+
 inline TimeAwaiter::TimeAwaiter(double sec)
     : mWhen(Clock::now() + std::chrono::duration_cast<ClockDuration>(std::chrono::duration<double>(sec)))
 {
@@ -298,56 +339,14 @@ inline void TimeAwaiter::Resume()
     mHandle.resume();
 }
 
-inline void Scheduler::Update()
-{
-    mExecuteQueue.SetupUpdate(Clock::now());
-
-    while (!mExecuteQueue.UpdateEnded())
-    {
-        mExecuteQueue.Pop().value()->Resume();
-    }
-}
-
-inline void Scheduler::Release(uint64_t id)
-{
-    auto it = mCoroutines.find(id);
-    assert(it != mCoroutines.end() && !it->second.released);
-
-    it->second.released = true;
-    if (it->second.released && it->second.finished)
-        mCoroutines.erase(it);
-}
-
-inline bool Scheduler::IsDown(uint64_t id)
-{
-    const auto it = mCoroutines.find(id);
-    assert(it != mCoroutines.end());
-    return it->second.finished;
-}
-
-inline void Scheduler::Stop(uint64_t id)
-{
-    const auto it = mCoroutines.find(id);
-    assert(it != mCoroutines.end());
-
-    if (!it->second.finished)
-    {
-        it->second.finished = true;
-        it->second.coro.Reset();
-        it->second.lambda = {};
-
-        if (it->second.released && it->second.finished)
-            mCoroutines.erase(it);
-    }
-}
-
 template <typename T>
 std::optional<T> Scheduler::GetReturn(uint64_t id)
 {
     return std::any_cast<T>(mCoroutines[id].returnValue);
 }
 
-//  Awaiter for All: waits all, returns tuple<Ts>...>
+//  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
+//
 template <typename... Ts>
 struct AllAwaiter : CoroAwaiterBase
 {
@@ -432,7 +431,8 @@ private:
     }
 };
 
-//  Awaiter for Any: waits first, returns tuple<optional<Ts>...>
+//  Awaiter for Any: waits first, returns tuple<optional<T1>, optional<T2>, optional<T2>...>
+//
 template <typename... Ts>
 struct AnyAwaiter : CoroAwaiterBase
 {
@@ -519,14 +519,12 @@ private:
     }
 };
 
-// All: returns tuple<Ts...>
 template <typename... Ts>
 auto All(Async<Ts>... coros)
 {
     return AllAwaiter<Ts...>(std::move(coros)...);
 }
 
-// Any: returns tuple<optional<Ts>...>
 template <typename... Ts>
 auto Any(Async<Ts>... coros)
 {
