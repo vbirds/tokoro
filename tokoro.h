@@ -71,10 +71,10 @@ private:
 };
 
 template <typename... Ts>
-struct AnyAwaiter;
+class AnyAwaiter;
 
 template <typename... Ts>
-struct AllAwaiter;
+class AllAwaiter;
 
 template <typename T>
 class Async
@@ -111,9 +111,9 @@ private:
     friend class Handle;
     friend class Scheduler;
     template <typename... Ts>
-    friend struct AllAwaiter;
+    friend class AllAwaiter;
     template <typename... Ts>
-    friend struct AnyAwaiter;
+    friend class AnyAwaiter;
 
     void SetId(uint64_t id)
     {
@@ -348,7 +348,7 @@ std::optional<T> Scheduler::GetReturn(uint64_t id)
 //  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
 //
 template <typename... Ts>
-class AllAwaiter : CoroAwaiterBase
+class AllAwaiter : public CoroAwaiterBase
 {
 private:
     std::tuple<Async<Ts>...>           mWaitedCoros;
@@ -371,7 +371,21 @@ public:
     void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
     {
         mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
-        resume_all(std::index_sequence_for<Ts...>{});
+
+        auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (
+                [this] {
+                    auto& coro    = std::get<Is>(mWaitedCoros);
+                    auto  handle  = coro.GetHandle();
+                    auto& promise = handle.promise();
+                    promise.SetScheduler(mParentHandle.promise().GetScheduler());
+                    promise.SetParentAwaiter(this);
+                    handle.resume();
+                }(),
+                ...);
+        };
+
+        resumeWithIndexes(std::index_sequence_for<Ts...>{});
     }
 
     auto await_resume() noexcept
@@ -381,62 +395,38 @@ public:
 
     void OnWaitComplete(std::coroutine_handle<> h) noexcept override
     {
-        store_result(h, std::index_sequence_for<Ts...>{});
+        auto findAndStoreWithIndexes = [this, h]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ([this, h] {
+                auto& coro = std::get<Is>(mWaitedCoros);
+                if (coro.GetHandle().address() == h.address())
+                {
+                    using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
+                    if constexpr (std::is_void_v<T>)
+                    {
+                        std::get<Is>(mResults) = std::monostate{};
+                    }
+                    else
+                    {
+                        using HandleT          = typename Async<T>::handle_type;
+                        auto done              = HandleT::from_address(h.address());
+                        std::get<Is>(mResults) = std::move(done.promise().GetReturnValue());
+                    }
+                }
+            }(),
+             ...);
+        };
+
+        findAndStoreWithIndexes(std::index_sequence_for<Ts...>{});
+
         if (--mRemainingCount == 0)
             mParentHandle.resume();
-    }
-
-private:
-    template <std::size_t... Is>
-    void resume_all(std::index_sequence<Is...>)
-    {
-        (resume_one<Is>(), ...);
-    }
-
-    template <std::size_t I>
-    void resume_one()
-    {
-        auto& coro   = std::get<I>(mWaitedCoros);
-        auto  handle = coro.GetHandle();
-
-        auto& promise = handle.promise();
-        promise.SetScheduler(mParentHandle.promise().GetScheduler());
-        promise.SetParentAwaiter(this);
-
-        handle.resume(); // Kick off sub Coro<T>
-    }
-
-    template <std::size_t... Is>
-    void store_result(std::coroutine_handle<> h, std::index_sequence<Is...>) noexcept
-    {
-        (store_one<Is>(h), ...);
-    }
-
-    template <std::size_t Index>
-    void store_one(std::coroutine_handle<> h) noexcept
-    {
-        using T       = std::tuple_element_t<Index, std::tuple<Ts...>>;
-        using HandleT = typename Async<T>::handle_type;
-        auto  done    = HandleT::from_address(h.address());
-        auto& coro    = std::get<Index>(mWaitedCoros);
-        if (done.address() == coro.GetHandle().address())
-        {
-            if constexpr (std::is_void_v<T>)
-            {
-                std::get<Index>(mResults) = std::monostate{};
-            }
-            else
-            {
-                std::get<Index>(mResults) = std::move(done.promise().GetReturnValue());
-            }
-        }
     }
 };
 
 //  Awaiter for Any: waits first, returns tuple<optional<T1>, optional<T2>, optional<T2>...>
 //
 template <typename... Ts>
-class AnyAwaiter : CoroAwaiterBase
+class AnyAwaiter : public CoroAwaiterBase
 {
 private:
     std::tuple<Async<Ts>...>                     mWaitedCoros;
@@ -459,7 +449,19 @@ public:
     void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
     {
         mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
-        resume_all(std::index_sequence_for<Ts...>{});
+
+        auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ([this] {
+                auto& coro    = std::get<Is>(mWaitedCoros);
+                auto  handle  = coro.GetHandle();
+                auto& promise = handle.promise();
+                promise.SetScheduler(mParentHandle.promise().GetScheduler());
+                promise.SetParentAwaiter(this);
+                handle.resume();
+            }(),
+             ...);
+        };
+        resumeWithIndexes(std::index_sequence_for<Ts...>{});
     }
 
     auto await_resume() noexcept
@@ -471,58 +473,33 @@ public:
     {
         if (!mTriggered)
         {
-            store_result(h, std::index_sequence_for<Ts...>{});
+            auto checkStoreWithIndexes = [this, h]<std::size_t... Is>(std::index_sequence<Is...>) {
+                ([this, h] {
+                    auto& coro = std::get<Is>(mWaitedCoros);
+                    if (coro.GetHandle().address() != h.address())
+                        return;
+
+                    using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
+                    if constexpr (std::is_void_v<T>)
+                    {
+                        std::get<Is>(mResults) = std::monostate{};
+                    }
+                    else
+                    {
+                        using HandleT          = typename Async<T>::handle_type;
+                        auto done              = HandleT::from_address(h.address());
+                        std::get<Is>(mResults) = std::move(done.promise().GetReturnValue());
+                    }
+                }(),
+                 ...);
+            };
+            checkStoreWithIndexes(std::index_sequence_for<Ts...>{});
+
+            mTriggered = true;
             mParentHandle.resume();
         }
     }
-
-private:
-    template <std::size_t... Is>
-    void resume_all(std::index_sequence<Is...>)
-    {
-        (resume_one<Is>(), ...);
-    }
-
-    template <std::size_t I>
-    void resume_one()
-    {
-        auto& coro   = std::get<I>(mWaitedCoros);
-        auto  handle = coro.GetHandle();
-
-        auto& promise = handle.promise();
-        promise.SetScheduler(mParentHandle.promise().GetScheduler());
-        promise.SetParentAwaiter(this);
-
-        handle.resume(); // Kick off sub Coro<T>
-    }
-
-    template <std::size_t... Is>
-    void store_result(std::coroutine_handle<> h, std::index_sequence<Is...>) noexcept
-    {
-        (store_one<Is>(h), ...);
-    }
-
-    template <std::size_t I>
-    void store_one(std::coroutine_handle<> h) noexcept
-    {
-        using T       = std::tuple_element_t<I, std::tuple<Ts...>>;
-        using HandleT = typename Async<T>::handle_type;
-        auto  done    = HandleT::from_address(h.address());
-        auto& coro    = std::get<I>(mWaitedCoros);
-        if (done.address() == coro.GetHandle().address())
-        {
-            if constexpr (std::is_void_v<T>)
-            {
-                std::get<I>(mResults) = std::monostate{};
-            }
-            else
-            {
-                std::get<I>(mResults) = std::move(done.promise().GetReturnValue());
-            }
-        }
-    }
 };
-
 template <typename... Ts>
 auto All(Async<Ts>... coros)
 {
