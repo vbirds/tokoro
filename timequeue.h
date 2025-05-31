@@ -1,6 +1,8 @@
 #pragma once
 
 #include "defines.h"
+
+#include <cassert>
 #include <set>
 
 namespace tokoro::internal
@@ -62,7 +64,6 @@ public:
         if (iter == mUpdatePtr)
         {
             mUpdatePtr = mSet.erase(mUpdatePtr);
-            MoveToNext();
         }
         else
         {
@@ -70,22 +71,22 @@ public:
         }
     }
 
-    std::optional<T> Pop()
+    T Pop()
     {
-        if (mUpdatePtr == mSet.end())
-            return std::nullopt;
+        // User should CheckUpdate() before Pop()
+        assert(mUpdatePtr != mSet.end());
 
         T ret = std::move(mUpdatePtr->value);
 
         mUpdatePtr = mSet.erase(mUpdatePtr);
-        MoveToNext();
 
         return ret;
     }
 
-    bool UpdateEnded() const noexcept
+    bool CheckUpdate() noexcept
     {
-        return mSet.empty() || mSet.end() == mUpdatePtr;
+        MoveToNext();
+        return !mSet.empty() && mSet.end() != mUpdatePtr;
     }
 
     void SetupUpdate(TimePoint exeTime)
@@ -94,8 +95,6 @@ public:
         mAddOrder   = 0;
         mUpdatePtr  = mSet.begin();
         mCurExeTime = exeTime;
-
-        MoveToNext();
     }
 
 private:
@@ -107,6 +106,7 @@ private:
 
             if (node.time > mCurExeTime)
             {
+                // Next item is for future to update. Stop.
                 mUpdatePtr = mSet.end();
                 break;
             }
@@ -117,6 +117,7 @@ private:
             }
             else
             {
+                // Found update
                 break;
             }
         }

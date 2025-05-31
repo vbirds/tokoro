@@ -183,9 +183,9 @@ public:
     {
         mExecuteQueue.SetupUpdate(Clock::now());
 
-        while (!mExecuteQueue.UpdateEnded())
+        while (mExecuteQueue.CheckUpdate())
         {
-            mExecuteQueue.Pop().value()->Resume();
+            mExecuteQueue.Pop()->Resume();
         }
     }
 

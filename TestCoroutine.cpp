@@ -72,7 +72,7 @@ void TestAllCombinator()
     auto h = sched.Start([&]() -> Async<void> {
         std::tie(a, b, c, d) = co_await All(
             DelayedValue(1, 0.0),
-            DelayedValue(2, 0.0),
+            DelayedValue(2, 0.001),
             DelayedValue(3, 0.0),
             Delayed(0.0));
         completed = true;
