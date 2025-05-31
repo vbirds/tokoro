@@ -7,7 +7,6 @@
 #include "tmplany.h"
 
 #include <any>
-#include <assert.h>
 #include <atomic>
 #include <cassert>
 #include <coroutine>
@@ -186,7 +185,7 @@ public:
 
         while (!mExecuteQueue.UpdateEnded())
         {
-            mExecuteQueue.Pop().value()->Resume();
+            mExecuteQueue.Pop()->Resume();
         }
     }
 
