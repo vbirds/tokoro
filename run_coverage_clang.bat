@@ -6,7 +6,7 @@ set SRC=TestCoroutine.cpp
 set EXE=CodeConvergeTest.exe
 set PROFRAW=default.profraw
 set PROFDATA=default.profdata
-set OUTPUTFOLDER=code_coverage_test
+set OUTPUTFOLDER=code_coverage_clang
 
 rem clear old files
 if exist %OUTPUTFOLDER% rd /s /q %OUTPUTFOLDER%
@@ -34,6 +34,6 @@ llvm-cov report %OUTPUTFOLDER%\%EXE% -instr-profile=%OUTPUTFOLDER%\%PROFDATA%
 echo -------------------------------------
 
 rem Opne coverage.txt
-notepad %OUTPUTFOLDER%\coverage.txt
+rem notepad %OUTPUTFOLDER%\coverage.txt
 
 endlocal

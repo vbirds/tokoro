@@ -12,3 +12,4 @@
 /TestCoroutine.vcxproj.user
 /x64/Debug
 code_coverage_test/
+code_coverage_gcc/
