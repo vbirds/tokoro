@@ -125,7 +125,7 @@ Async<int> Fib(int n)
     if (n < 2)
         co_return n;
 
-    co_await NextFrame();
+    co_await Wait(0);
 
     auto a  = Fib(n - 1);
     auto b  = Fib(n - 2);
@@ -188,9 +188,9 @@ void TestNextFrame()
     int       count = 0;
 
     auto h = sched.Start([&]() -> Async<void> {
-        co_await NextFrame(); // resume 1
+        co_await Wait(0); // resume 1
         count += 1;
-        co_await NextFrame(); // resume 2
+        co_await Wait(0); // resume 2
         count += 2;
     });
 
@@ -213,7 +213,7 @@ void TestStop()
     auto h = sched.Start([&]() -> Async<void> {
         while (true)
         {
-            co_await NextFrame();
+            co_await Wait(0);
             loops++;
         }
     });
@@ -256,10 +256,10 @@ void TestStartInCoroutine()
     int       frame = 0;
 
     sched.Start([&]() -> Async<void> {
-        co_await NextFrame();
+        co_await Wait(0);
 
         auto innerCoro = [&]() -> Async<void> {
-            co_await NextFrame();
+            co_await Wait(0);
             // Inner coroutine should always resume in next frame
             assert(frame == 1);
         };
@@ -275,7 +275,7 @@ void TestStartInCoroutine()
 
     // One more outer coro to make sure the first update won't exceed immediately.
     sched.Start([&]() -> Async<void> {
-        co_await NextFrame();
+        co_await Wait(0);
         assert(frame == 0);
     });
 
