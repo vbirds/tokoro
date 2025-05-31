@@ -13,3 +13,4 @@
 /x64/Debug
 code_coverage_test/
 code_coverage_gcc/
+code_coverage_clang/
