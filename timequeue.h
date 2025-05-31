@@ -1,8 +1,6 @@
 #pragma once
 
 #include "defines.h"
-
-#include <cassert>
 #include <set>
 
 namespace tokoro::internal
@@ -64,6 +62,7 @@ public:
         if (iter == mUpdatePtr)
         {
             mUpdatePtr = mSet.erase(mUpdatePtr);
+            MoveToNext();
         }
         else
         {
@@ -71,21 +70,22 @@ public:
         }
     }
 
-    T Pop()
+    std::optional<T> Pop()
     {
-        // User should always check UpdateEnded() before Pop
-        assert(mUpdatePtr != mSet.end());
+        if (mUpdatePtr == mSet.end())
+            return std::nullopt;
 
         T ret = std::move(mUpdatePtr->value);
 
         mUpdatePtr = mSet.erase(mUpdatePtr);
+        MoveToNext();
 
         return ret;
     }
 
     bool UpdateEnded() const noexcept
     {
-        return mSet.empty() || !IsNextAvailable();
+        return mSet.empty() || mSet.end() == mUpdatePtr;
     }
 
     void SetupUpdate(TimePoint exeTime)
@@ -94,12 +94,32 @@ public:
         mAddOrder   = 0;
         mUpdatePtr  = mSet.begin();
         mCurExeTime = exeTime;
+
+        MoveToNext();
     }
 
 private:
-    bool IsNextAvailable() const
+    void MoveToNext()
     {
-        return mUpdatePtr != mSet.end() && mUpdatePtr->time <= mCurExeTime;
+        while (mUpdatePtr != mSet.end())
+        {
+            const Node& node = *mUpdatePtr;
+
+            if (node.time > mCurExeTime)
+            {
+                mUpdatePtr = mSet.end();
+                break;
+            }
+
+            if (node.frame == mAddFrame)
+            {
+                ++mUpdatePtr;
+            }
+            else
+            {
+                break;
+            }
+        }
     }
 
     Iterator AddImpl(const TimePoint& time, const T& e)

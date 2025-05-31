@@ -185,7 +185,7 @@ public:
 
         while (!mExecuteQueue.UpdateEnded())
         {
-            mExecuteQueue.Pop()->Resume();
+            mExecuteQueue.Pop().value()->Resume();
         }
     }
 
