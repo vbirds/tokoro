@@ -14,9 +14,11 @@ inline bool PromiseBase::FinalAwaiter::await_ready() const noexcept
     return false;
 }
 
+// LCOV_EXCL_START This function never used, but compiler need it.
 inline void PromiseBase::FinalAwaiter::await_resume() const noexcept
 {
 }
+// LCOV_EXCL_STOP
 
 inline void PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
 {
@@ -50,10 +52,12 @@ inline auto PromiseBase::final_suspend() noexcept
     return FinalAwaiter{};
 }
 
+// LCOV_EXCL_START TODO wait until exception implement.
 inline void PromiseBase::unhandled_exception()
 {
     std::terminate();
 }
+// LCOV_EXCL_STOP
 
 inline void PromiseBase::SetId(uint64_t id)
 {
