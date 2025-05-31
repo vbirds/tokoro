@@ -306,6 +306,36 @@ void TestGlobalScheduler()
     std::cout << "TestGlobalScheduler passed\n";
 }
 
+template <typename T>
+struct TmplTester
+{
+    void Check()
+    {
+        if constexpr (!std::is_same<T, int>::value)
+        {
+            assert(false);
+        }
+    }
+};
+
+// Test only to make sure the move/copy constructor works.
+void TestTmplAnyMove()
+{
+    internal::TmplAny<TmplTester> A = TmplTester<int>();
+    internal::TmplAny<TmplTester> B = TmplTester<int>();
+
+    internal::TmplAny<TmplTester> test(std::move(A));
+    test.WithTmplArg<int>().Check();
+
+    test = std::move(B);
+    test.WithTmplArg<int>().Check();
+
+    internal::TmplAny<TmplTester> test2(test);
+    test2.WithTmplArg<int>().Check();
+
+    std::cout << "TestTmplAnyMove passed\n";
+}
+
 int main()
 {
     TestSingleAwaitValue();
@@ -317,6 +347,7 @@ int main()
     TestUseHandleAfterSchedulerDestroyed();
     TestStartInCoroutine();
     TestGlobalScheduler();
+    TestTmplAnyMove();
 
     TestStress(10000, 10);
 

@@ -1,12 +1,11 @@
 #pragma once
 #include <assert.h>
 #include <cstddef>
-#include <new>
 #include <type_traits>
 #include <typeindex>
 #include <utility>
 
-namespace tokoro
+namespace tokoro::internal
 {
 
 // Detect if a template template parameter is instantiable
@@ -191,4 +190,4 @@ public:
     }
 };
 
-} // namespace tokoro
+} // namespace tokoro::internal
