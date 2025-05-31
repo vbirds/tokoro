@@ -25,7 +25,7 @@ public:
 
     Wait();
 
-    virtual ~Wait();
+    ~Wait();
 
     bool await_ready() const noexcept;
 
