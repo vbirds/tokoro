@@ -7,7 +7,6 @@
 #include "tmplany.h"
 
 #include <any>
-#include <atomic>
 #include <cassert>
 #include <coroutine>
 #include <functional>
@@ -248,7 +247,7 @@ private:
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
-    std::atomic<uint64_t>               mNextId{1};
+    uint64_t                            mNextId{1};
     internal::TimeQueue<Wait*>          mExecuteQueue;
     std::shared_ptr<std::monostate>     mLiveSignal;
 };
