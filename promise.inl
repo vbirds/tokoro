@@ -7,6 +7,9 @@
 
 #include <cassert>
 
+namespace tokoro::internal
+{
+
 // PromiseBase::FinalAwaiter functions
 //
 inline bool PromiseBase::FinalAwaiter::await_ready() const noexcept
@@ -115,3 +118,5 @@ inline auto Promise<void>::get_return_object() noexcept
 inline void Promise<void>::return_void()
 {
 }
+
+} // namespace tokoro::internal

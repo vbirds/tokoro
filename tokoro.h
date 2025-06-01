@@ -16,8 +16,6 @@
 namespace tokoro
 {
 
-using namespace internal;
-
 class Wait
 {
 public:
@@ -30,16 +28,16 @@ public:
     bool await_ready() const noexcept;
 
     template <typename T>
-    void await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept;
+    void await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept;
 
     void await_resume() const noexcept;
 
     void Resume();
 
 private:
-    std::optional<TimeQueue<Wait*>::Iterator> mExeIter;
-    TimePoint                                 mWhen;
-    std::coroutine_handle<PromiseBase>        mHandle = nullptr;
+    std::optional<internal::TimeQueue<Wait*>::Iterator> mExeIter;
+    internal::TimePoint                                 mWhen;
+    std::coroutine_handle<internal::PromiseBase>        mHandle = nullptr;
 };
 
 template <typename T>
@@ -79,7 +77,7 @@ template <typename T>
 class Async
 {
 public:
-    using promise_type = Promise<T>;
+    using promise_type = internal::Promise<T>;
     using value_type   = T;
     using handle_type  = std::coroutine_handle<promise_type>;
 
@@ -102,7 +100,7 @@ public:
 
     auto operator co_await() noexcept
     {
-        return SingleCoroAwaiter(GetHandle());
+        return internal::SingleCoroAwaiter(GetHandle());
     }
 
 private:
@@ -181,7 +179,7 @@ public:
 
     void Update()
     {
-        mExecuteQueue.SetupUpdate(Clock::now());
+        mExecuteQueue.SetupUpdate(internal::Clock::now());
 
         while (mExecuteQueue.CheckUpdate())
         {
@@ -194,7 +192,7 @@ private:
     friend class Handle;
     template <typename T>
     friend class Async;
-    friend PromiseBase;
+    friend internal::PromiseBase;
     friend Wait;
 
     void Release(uint64_t id)
@@ -242,16 +240,16 @@ private:
 
     struct Entry
     {
-        TmplAny<Async>                  coro;
-        std::function<TmplAny<Async>()> lambda;
-        bool                            finished = false;
-        bool                            released = false;
-        std::any                        returnValue;
+        internal::TmplAny<Async>                  coro;
+        std::function<internal::TmplAny<Async>()> lambda;
+        bool                                      finished = false;
+        bool                                      released = false;
+        std::any                                  returnValue;
     };
 
     std::unordered_map<uint64_t, Entry> mCoroutines;
     std::atomic<uint64_t>               mNextId{1};
-    TimeQueue<Wait*>                    mExecuteQueue;
+    internal::TimeQueue<Wait*>          mExecuteQueue;
     std::shared_ptr<std::monostate>     mLiveSignal;
 };
 
@@ -300,18 +298,18 @@ std::optional<T> Handle<T>::GetReturn() const noexcept
 // TimeAwaiter functions
 //
 template <typename T>
-void Wait::await_suspend(std::coroutine_handle<Promise<T>> handle) noexcept
+void Wait::await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept
 {
-    mHandle  = std::coroutine_handle<PromiseBase>::from_address(handle.address());
+    mHandle  = std::coroutine_handle<internal::PromiseBase>::from_address(handle.address());
     mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
 }
 
 inline Wait::Wait(double sec)
-    : mWhen(Clock::now() + std::chrono::duration_cast<ClockDuration>(std::chrono::duration<double>(sec)))
+    : mWhen(internal::Clock::now() + std::chrono::duration_cast<internal::ClockDuration>(std::chrono::duration<double>(sec)))
 {
 }
 
-inline Wait::Wait() : mWhen(TimePoint::min())
+inline Wait::Wait() : mWhen(internal::TimePoint::min())
 {
 }
 
@@ -347,13 +345,13 @@ std::optional<T> Scheduler::GetReturn(uint64_t id)
 //  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
 //
 template <typename... Ts>
-class All : public CoroAwaiterBase
+class All : public internal::CoroAwaiterBase
 {
 private:
-    std::tuple<Async<Ts>...>           mWaitedCoros;
-    std::tuple<RetConvert<Ts>...>      mResults;
-    std::size_t                        mRemainingCount;
-    std::coroutine_handle<PromiseBase> mParentHandle;
+    std::tuple<Async<Ts>...>                     mWaitedCoros;
+    std::tuple<internal::RetConvert<Ts>...>      mResults;
+    std::size_t                                  mRemainingCount;
+    std::coroutine_handle<internal::PromiseBase> mParentHandle;
 
 public:
     All(Async<Ts>&&... cs)
@@ -367,9 +365,9 @@ public:
     }
 
     template <typename T>
-    void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
+    void await_suspend(std::coroutine_handle<internal::Promise<T>> h) noexcept
     {
-        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
+        mParentHandle = std::coroutine_handle<internal::PromiseBase>::from_address(h.address());
 
         auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
             (
@@ -425,13 +423,13 @@ public:
 //  Awaiter for Any: waits first, returns tuple<optional<T1>, optional<T2>, optional<T2>...>
 //
 template <typename... Ts>
-class Any : public CoroAwaiterBase
+class Any : public internal::CoroAwaiterBase
 {
 private:
-    std::tuple<Async<Ts>...>                     mWaitedCoros;
-    std::tuple<std::optional<RetConvert<Ts>>...> mResults;
-    bool                                         mTriggered{false};
-    std::coroutine_handle<PromiseBase>           mParentHandle;
+    std::tuple<Async<Ts>...>                               mWaitedCoros;
+    std::tuple<std::optional<internal::RetConvert<Ts>>...> mResults;
+    bool                                                   mTriggered{false};
+    std::coroutine_handle<internal::PromiseBase>           mParentHandle;
 
 public:
     Any(Async<Ts>&&... cs)
@@ -445,9 +443,9 @@ public:
     }
 
     template <typename T>
-    void await_suspend(std::coroutine_handle<Promise<T>> h) noexcept
+    void await_suspend(std::coroutine_handle<internal::Promise<T>> h) noexcept
     {
-        mParentHandle = std::coroutine_handle<PromiseBase>::from_address(h.address());
+        mParentHandle = std::coroutine_handle<internal::PromiseBase>::from_address(h.address());
 
         auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([this] {
@@ -506,6 +504,6 @@ static Scheduler& GlobalScheduler()
     return s;
 }
 
-#include "promise.inl"
-
 } // namespace tokoro
+
+#include "promise.inl"
