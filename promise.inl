@@ -68,15 +68,15 @@ inline void PromiseBase::SetId(uint64_t id)
 }
 
 template <typename UpdateEnum, typename TimeEnum>
-void PromiseBase::SetScheduler(Scheduler<UpdateEnum, TimeEnum>* scheduler)
+void PromiseBase::SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler)
 {
     mScheduler = static_cast<void*>(scheduler);
 }
 
 template <typename UpdateEnum, typename TimeEnum>
-Scheduler<UpdateEnum, TimeEnum>* PromiseBase::GetScheduler() const
+SchedulerBP<UpdateEnum, TimeEnum>* PromiseBase::GetScheduler() const
 {
-    return static_cast<Scheduler<UpdateEnum, TimeEnum>*>(mScheduler);
+    return static_cast<SchedulerBP<UpdateEnum, TimeEnum>*>(mScheduler);
 }
 
 inline void PromiseBase::SetParentAwaiter(CoroAwaiterBase* awaiter)

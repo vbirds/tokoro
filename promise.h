@@ -9,7 +9,7 @@ namespace tokoro
 {
 
 template <typename UpdateEnum, typename TimeEnum>
-class Scheduler;
+class SchedulerBP;
 
 namespace internal
 {
@@ -32,10 +32,10 @@ public:
     void                SetId(uint64_t id);
 
     template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
-    void SetScheduler(Scheduler<UpdateEnum, TimeEnum>* scheduler);
+    void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler);
 
     template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
-    Scheduler<UpdateEnum, TimeEnum>* GetScheduler() const;
+    SchedulerBP<UpdateEnum, TimeEnum>* GetScheduler() const;
 
     void SetParentAwaiter(CoroAwaiterBase* awaiter);
 

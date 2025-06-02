@@ -233,7 +233,7 @@ void TestStop()
 
 void TestUseHandleAfterSchedulerDestroyed()
 {
-    Scheduler<>* sched = new Scheduler();
+    Scheduler* sched = new Scheduler();
 
     auto handle = sched->Start([&]() -> Async<int> {
         co_await Wait(0.00000000001);
@@ -287,9 +287,9 @@ void TestStartInCoroutine()
     std::cout << "TestStartInCoroutine passed\n";
 }
 
-static Scheduler<>& GlobalScheduler()
+static Scheduler& GlobalScheduler()
 {
-    static Scheduler<> s;
+    static Scheduler s;
     return s;
 }
 
@@ -365,10 +365,10 @@ enum class TimeType
 // Give alias names for ease of life.
 // Note: You can still use Scheduler, Wait and Handle if you really like them.
 // Just don't introduce 'using namespace tokoro' to your code.
-using MyScheduler = Scheduler<UpdateType, TimeType>;
-using MyWait      = Wait<UpdateType, TimeType>;
+using MyScheduler = SchedulerBP<UpdateType, TimeType>;
+using MyWait      = WaitBP<UpdateType, TimeType>;
 template <typename T>
-using MyHandle = Handle<T, int, float>;
+using MyHandle = HandleBP<T, UpdateType, TimeType>;
 
 void TestCustomUpdateAndTimers()
 {
@@ -388,7 +388,7 @@ void TestCustomUpdateAndTimers()
     UpdateType curUpdateType = UpdateType::PreUpdate;
 
     // Define the test coroutine
-    auto handle = sched.Start([&]() -> Async<void> {
+    MyHandle handle = sched.Start([&]() -> Async<void> {
         // Check wait in realtime
         co_await MyWait(1);
         assert(emuRealTime >= 1);
