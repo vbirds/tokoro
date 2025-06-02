@@ -1,24 +1,8 @@
 #pragma once
 
 #include <coroutine>
+#include <cstdint>
 #include <variant>
-
-namespace tokoro
-{
-
-enum class PresetUpdateType
-{
-    Update = 0,
-    Count
-};
-
-enum class PresetTimeType
-{
-    Realtime = 0,
-    Count
-};
-
-} // namespace tokoro
 
 namespace tokoro::internal
 {
@@ -33,5 +17,19 @@ public:
 // map void to std::monostate
 template <typename T>
 using RetConvert = std::conditional_t<std::is_void_v<T>, std::monostate, T>;
+
+enum class PresetUpdateType : int
+{
+    Update = 0,
+    Count,
+    Default = Update,
+};
+
+enum class PresetTimeType : int
+{
+    Realtime = 0,
+    Count,
+    Default = Realtime,
+};
 
 } // namespace tokoro::internal

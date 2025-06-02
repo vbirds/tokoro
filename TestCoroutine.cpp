@@ -342,6 +342,123 @@ void TestTmplAnyMove()
     std::cout << "TestTmplAnyMove passed\n";
 }
 
+// TestCustomUpdateAndTimers
+//
+enum class UpdateType
+{
+    PreUpdate = 0,
+    Update,
+
+    PostUpdate,
+    Count,
+    Default = Update,
+};
+
+enum class TimeType
+{
+    EmuRealTime = 0,
+    GameTime,
+    Count,
+    Default = EmuRealTime,
+};
+
+// Give alias names for ease of life.
+// Note: You can still use Scheduler, Wait and Handle if you really like them.
+// Just don't introduce 'using namespace tokoro' to your code.
+using MyScheduler = Scheduler<UpdateType, TimeType>;
+using MyWait      = Wait<UpdateType, TimeType>;
+template <typename T>
+using MyHandle = Handle<T, int, float>;
+
+void TestCustomUpdateAndTimers()
+{
+    MyScheduler sched;
+
+    double emuRealTime = 0;
+    // Note: this timer is only for test,
+    // in most applications the default timer is good enough for 'real time'
+    sched.SetCustomTimer(TimeType::EmuRealTime, [&]() -> double { return emuRealTime; });
+
+    double gameTime = 0;
+    sched.SetCustomTimer(TimeType::GameTime, [&]() -> double { return gameTime; });
+
+    bool gamePaused = false;
+
+    // Help variable for reality checking
+    UpdateType curUpdateType = UpdateType::PreUpdate;
+
+    // Define the test coroutine
+    auto handle = sched.Start([&]() -> Async<void> {
+        // Check wait in realtime
+        co_await MyWait(1);
+        assert(emuRealTime >= 1);
+
+        // Check the ability to switch between updates.
+        co_await MyWait(0, UpdateType::PreUpdate);
+        assert(curUpdateType == UpdateType::PreUpdate);
+
+        co_await MyWait(0, UpdateType::Update);
+        assert(curUpdateType == UpdateType::Update);
+
+        co_await MyWait(0, UpdateType::PostUpdate);
+        assert(curUpdateType == UpdateType::PostUpdate);
+
+        // Start another coro to stop and start the game time.
+        sched.Start([&]() -> Async<void> {
+            gamePaused = true;
+            co_await MyWait(2);
+            gamePaused = false;
+        });
+
+        const double saveGameTime = gameTime;
+        co_await MyWait(0, UpdateType::Update, TimeType::GameTime); // Wait one game frame
+        // Game time should be still paused.
+        // Please note this compare assumes EmuRealTime update is before GameTime. Or there will be one frame time diff.
+        assert(saveGameTime == gameTime);
+
+        // Wait until the game time start to move again.
+        co_await MyWait(0.1, UpdateType::Update, TimeType::GameTime);
+        assert(saveGameTime < gameTime);
+        assert(gameTime < emuRealTime);
+
+        // Check the ability to switch between updates ub game time.
+        co_await MyWait(0, UpdateType::PreUpdate, TimeType::GameTime);
+        assert(curUpdateType == UpdateType::PreUpdate);
+
+        co_await MyWait(0, UpdateType::Update, TimeType::GameTime);
+        assert(curUpdateType == UpdateType::Update);
+
+        co_await MyWait(0, UpdateType::PostUpdate, TimeType::GameTime);
+        assert(curUpdateType == UpdateType::PostUpdate);
+    });
+
+    // Game Loop
+    //
+    constexpr double frameTime = 0.166666;
+    for (int i = 0; i < 100 && !handle.IsDown(); ++i)
+    {
+        emuRealTime += frameTime;
+        if (!gamePaused)
+            gameTime += frameTime;
+
+        curUpdateType = UpdateType::PreUpdate;
+        sched.Update(UpdateType::PreUpdate, TimeType::EmuRealTime);
+        sched.Update(UpdateType::PreUpdate, TimeType::GameTime);
+
+        curUpdateType = UpdateType::Update;
+        sched.Update(UpdateType::Update, TimeType::EmuRealTime);
+        sched.Update(UpdateType::Update, TimeType::GameTime);
+
+        curUpdateType = UpdateType::PostUpdate;
+        sched.Update(UpdateType::PostUpdate, TimeType::EmuRealTime);
+        sched.Update(UpdateType::PostUpdate, TimeType::GameTime);
+    }
+
+    // task should finish in time
+    assert(handle.IsDown());
+    std::cout << "TestCustomUpdateAndTimers passed\n";
+}
+
 int main()
 {
     TestSingleAwaitValue();
@@ -354,6 +471,7 @@ int main()
     TestStartInCoroutine();
     TestGlobalScheduler();
     TestTmplAnyMove();
+    TestCustomUpdateAndTimers();
 
     TestStress(10000, 10);
 

@@ -11,7 +11,6 @@
 #include <cassert>
 #include <chrono>
 #include <coroutine>
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -22,12 +21,12 @@ namespace tokoro
 template <typename UpdateEnum, typename TimeEnum>
 class Scheduler;
 
-template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+template <typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
 class Wait
 {
 public:
-    Wait(double sec, UpdateEnum updateType = UpdateEnum::Update, TimeEnum timeType = TimeEnum::Realtime);
-    Wait(UpdateEnum updateType = UpdateEnum::Update, TimeEnum timeType = TimeEnum::Realtime);
+    Wait(double sec, UpdateEnum updateType = UpdateEnum::Default, TimeEnum timeType = TimeEnum::Default);
+    Wait(UpdateEnum updateType = UpdateEnum::Default, TimeEnum timeType = TimeEnum::Default);
     ~Wait();
 
     // Functions for C++ coroutine callbacks
@@ -49,7 +48,7 @@ private:
     TimeEnum                                                     mTimeType;
 };
 
-template <typename T, typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+template <typename T, typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
 class Handle
 {
 public:
@@ -146,7 +145,7 @@ private:
     std::coroutine_handle<> mHandle;
 };
 
-template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+template <typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
 class Scheduler
 {
 private:
@@ -168,8 +167,13 @@ public:
         }
     }
 
+    void SetCustomTimer(TimeEnum timeType, std::function<double()> getTimeFunc)
+    {
+        mCustomTimers[static_cast<int>(timeType)] = std::move(getTimeFunc);
+    }
+
     template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
-    Handle<RetType> Start(Task&& task, Args&&... args)
+    Handle<RetType, UpdateEnum, TimeEnum> Start(Task&& task, Args&&... args)
     {
         uint64_t id          = mNextId++;
         auto [iter, succeed] = mCoroutines.emplace(id, Entry());
@@ -193,14 +197,14 @@ public:
         // Kick off the coroutine.
         newCoro.Resume();
 
-        return Handle<RetType>{id, this, mLiveSignal};
+        return Handle<RetType, UpdateEnum, TimeEnum>{id, this, mLiveSignal};
     }
 
     void Update(UpdateEnum updateType = UpdateEnum::Update,
                 TimeEnum   timeType   = TimeEnum::Realtime)
     {
         auto& timeQueue = GetUpdateQueue(updateType, timeType);
-        timeQueue.SetupUpdate(GetCurrentTime(updateType, timeType));
+        timeQueue.SetupUpdate(GetCurrentTime(timeType));
 
         while (timeQueue.CheckUpdate())
         {
@@ -265,7 +269,7 @@ private:
     {
         const int updateIndex = static_cast<int>(updateType);
         const int timeIndex   = static_cast<int>(timeType);
-        return updateIndex * static_cast<int>(UpdateEnum::Count) + timeIndex;
+        return updateIndex * static_cast<int>(TimeEnum::Count) + timeIndex;
     }
 
     internal::TimeQueue<MyWait*>& GetUpdateQueue(UpdateEnum updateType, TimeEnum timeType)
@@ -274,10 +278,9 @@ private:
         return mExecuteQueues[queueIndex];
     }
 
-    std::function<double()>& GetCustomTimer(UpdateEnum updateType, TimeEnum timeType)
+    std::function<double()>& GetCustomTimer(TimeEnum timeType)
     {
-        int queueIndex = TypesToIndex(updateType, timeType);
-        return mCustomTimers[queueIndex];
+        return mCustomTimers[static_cast<int>(timeType)];
     }
 
     static double defaultTimer()
@@ -290,9 +293,9 @@ private:
         return diff.count();
     }
 
-    double GetCurrentTime(UpdateEnum updateType, TimeEnum timeType)
+    double GetCurrentTime(TimeEnum timeType)
     {
-        auto& customTimer = GetCustomTimer(updateType, timeType);
+        auto& customTimer = GetCustomTimer(timeType);
         if (customTimer)
         {
             return customTimer();
@@ -310,7 +313,7 @@ private:
 
         double executeTime = 0;
         if (wait->mDelay != 0)
-            executeTime = GetCurrentTime(updateType, timeType) + wait->mDelay;
+            executeTime = GetCurrentTime(timeType) + wait->mDelay;
         return timeQueue.AddTimed(executeTime, wait);
     }
 
@@ -329,11 +332,11 @@ private:
         std::any                                  returnValue;
     };
 
-    std::unordered_map<uint64_t, Entry>                        mCoroutines;
-    uint64_t                                                   mNextId{1};
-    std::array<internal::TimeQueue<MyWait*>, UpdateQueueCount> mExecuteQueues;
-    std::array<std::function<double()>, UpdateQueueCount>      mCustomTimers;
-    std::shared_ptr<std::monostate>                            mLiveSignal;
+    std::unordered_map<uint64_t, Entry>                                    mCoroutines;
+    uint64_t                                                               mNextId{1};
+    std::array<internal::TimeQueue<MyWait*>, UpdateQueueCount>             mExecuteQueues;
+    std::array<std::function<double()>, static_cast<int>(TimeEnum::Count)> mCustomTimers;
+    std::shared_ptr<std::monostate>                                        mLiveSignal;
 };
 
 // Handle functions
