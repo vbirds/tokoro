@@ -1,14 +1,27 @@
 #pragma once
 
-#include <chrono>
 #include <coroutine>
+#include <variant>
+
+namespace tokoro
+{
+
+enum class PresetUpdateType
+{
+    Update = 0,
+    Count
+};
+
+enum class PresetTimeType
+{
+    Realtime = 0,
+    Count
+};
+
+} // namespace tokoro
 
 namespace tokoro::internal
 {
-
-using Clock         = std::chrono::steady_clock;
-using TimePoint     = Clock::time_point;
-using ClockDuration = Clock::duration;
 
 class CoroAwaiterBase
 {

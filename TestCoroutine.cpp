@@ -233,7 +233,7 @@ void TestStop()
 
 void TestUseHandleAfterSchedulerDestroyed()
 {
-    Scheduler* sched = new Scheduler();
+    Scheduler<>* sched = new Scheduler();
 
     auto handle = sched->Start([&]() -> Async<int> {
         co_await Wait(0.00000000001);
@@ -285,6 +285,12 @@ void TestStartInCoroutine()
     }
 
     std::cout << "TestStartInCoroutine passed\n";
+}
+
+static Scheduler<>& GlobalScheduler()
+{
+    static Scheduler<> s;
+    return s;
 }
 
 // Test global scheduler and GetReturn

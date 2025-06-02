@@ -1,11 +1,14 @@
 #pragma once
 
+#include "defines.h"
+
 #include <any>
 #include <coroutine>
 
 namespace tokoro
 {
 
+template <typename UpdateEnum, typename TimeEnum>
 class Scheduler;
 
 namespace internal
@@ -27,15 +30,20 @@ public:
     auto                final_suspend() noexcept;
     void                unhandled_exception();
     void                SetId(uint64_t id);
-    void                SetScheduler(Scheduler* scheduler);
-    Scheduler*          GetScheduler() const;
-    void                SetParentAwaiter(CoroAwaiterBase* awaiter);
+
+    template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+    void SetScheduler(Scheduler<UpdateEnum, TimeEnum>* scheduler);
+
+    template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+    Scheduler<UpdateEnum, TimeEnum>* GetScheduler() const;
+
+    void SetParentAwaiter(CoroAwaiterBase* awaiter);
 
 protected:
     std::any         mReturnValue;
     uint64_t         mId            = 0;
     CoroAwaiterBase* mParentAwaiter = nullptr;
-    Scheduler*       mScheduler     = nullptr;
+    void*            mScheduler     = nullptr;
 };
 
 template <typename T>

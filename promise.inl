@@ -67,14 +67,16 @@ inline void PromiseBase::SetId(uint64_t id)
     mId = id;
 }
 
-inline void PromiseBase::SetScheduler(Scheduler* scheduler)
+template <typename UpdateEnum, typename TimeEnum>
+void PromiseBase::SetScheduler(Scheduler<UpdateEnum, TimeEnum>* scheduler)
 {
-    mScheduler = scheduler;
+    mScheduler = static_cast<void*>(scheduler);
 }
 
-inline Scheduler* PromiseBase::GetScheduler() const
+template <typename UpdateEnum, typename TimeEnum>
+Scheduler<UpdateEnum, TimeEnum>* PromiseBase::GetScheduler() const
 {
-    return mScheduler;
+    return static_cast<Scheduler<UpdateEnum, TimeEnum>*>(mScheduler);
 }
 
 inline void PromiseBase::SetParentAwaiter(CoroAwaiterBase* awaiter)

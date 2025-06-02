@@ -7,39 +7,49 @@
 #include "tmplany.h"
 
 #include <any>
+#include <array>
 #include <cassert>
+#include <chrono>
 #include <coroutine>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace tokoro
 {
 
+template <typename UpdateEnum, typename TimeEnum>
+class Scheduler;
+
+template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
 class Wait
 {
 public:
-    Wait(double sec);
-
-    Wait();
-
+    Wait(double sec, UpdateEnum updateType = UpdateEnum::Update, TimeEnum timeType = TimeEnum::Realtime);
+    Wait(UpdateEnum updateType = UpdateEnum::Update, TimeEnum timeType = TimeEnum::Realtime);
     ~Wait();
 
+    // Functions for C++ coroutine callbacks
+    //
     bool await_ready() const noexcept;
-
     template <typename T>
     void await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept;
-
     void await_resume() const noexcept;
 
     void Resume();
 
 private:
-    std::optional<internal::TimeQueue<Wait*>::Iterator> mExeIter;
-    internal::TimePoint                                 mWhen;
-    std::coroutine_handle<internal::PromiseBase>        mHandle = nullptr;
+    friend class Scheduler<UpdateEnum, TimeEnum>;
+
+    std::optional<typename internal::TimeQueue<Wait*>::Iterator> mExeIter;
+    double                                                       mDelay;
+    std::coroutine_handle<internal::PromiseBase>                 mHandle = nullptr;
+    UpdateEnum                                                   mUpdateType;
+    TimeEnum                                                     mTimeType;
 };
 
-template <typename T>
+template <typename T, typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
 class Handle
 {
 public:
@@ -54,16 +64,16 @@ public:
         requires(!std::is_void_v<T>);
 
 private:
-    friend Scheduler;
+    friend class Scheduler<UpdateEnum, TimeEnum>;
 
-    Handle(uint64_t id, Scheduler* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
+    Handle(uint64_t id, Scheduler<UpdateEnum, TimeEnum>* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
         : mId(id), mScheduler(scheduler), mSchedulerLiveSignal(liveSignal)
     {
     }
 
-    uint64_t                      mId        = 0;
-    Scheduler*                    mScheduler = nullptr;
-    std::weak_ptr<std::monostate> mSchedulerLiveSignal;
+    uint64_t                         mId        = 0;
+    Scheduler<UpdateEnum, TimeEnum>* mScheduler = nullptr;
+    std::weak_ptr<std::monostate>    mSchedulerLiveSignal;
 };
 
 template <typename... Ts>
@@ -103,8 +113,9 @@ public:
     }
 
 private:
-    template <typename U>
+    template <typename U, typename UpdateEnum, typename TimeEnum>
     friend class Handle;
+    template <typename UpdateEnum, typename TimeEnum>
     friend class Scheduler;
     template <typename... Ts>
     friend class All;
@@ -116,7 +127,8 @@ private:
         GetHandle().promise().SetId(id);
     }
 
-    void SetScheduler(Scheduler* scheduler)
+    template <typename UpdateEnum, typename TimeEnum>
+    void SetScheduler(Scheduler<UpdateEnum, TimeEnum>* scheduler)
     {
         GetHandle().promise().SetScheduler(scheduler);
     }
@@ -134,8 +146,12 @@ private:
     std::coroutine_handle<> mHandle;
 };
 
+template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
 class Scheduler
 {
+private:
+    static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
+
 public:
     Scheduler()
     {
@@ -145,7 +161,11 @@ public:
     ~Scheduler()
     {
         mCoroutines.clear();
-        mExecuteQueue.Clear();
+
+        for (auto& queue : mExecuteQueues)
+        {
+            queue.Clear();
+        }
     }
 
     template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
@@ -166,7 +186,7 @@ public:
         // Create the Coro<T>
         newEntry.coro = newEntry.lambda();
 
-        auto& newCoro = newEntry.coro.WithTmplArg<RetType>();
+        auto& newCoro = newEntry.coro.template WithTmplArg<RetType>();
         newCoro.SetId(id);
         newCoro.SetScheduler(this);
 
@@ -176,23 +196,27 @@ public:
         return Handle<RetType>{id, this, mLiveSignal};
     }
 
-    void Update()
+    void Update(UpdateEnum updateType = UpdateEnum::Update,
+                TimeEnum   timeType   = TimeEnum::Realtime)
     {
-        mExecuteQueue.SetupUpdate(internal::Clock::now());
+        auto& timeQueue = GetUpdateQueue(updateType, timeType);
+        timeQueue.SetupUpdate(GetCurrentTime(updateType, timeType));
 
-        while (mExecuteQueue.CheckUpdate())
+        while (timeQueue.CheckUpdate())
         {
-            mExecuteQueue.Pop()->Resume();
+            timeQueue.Pop()->Resume();
         }
     }
 
 private:
-    template <typename T>
+    using MyWait = Wait<UpdateEnum, TimeEnum>;
+
+    template <typename T, typename U, typename X>
     friend class Handle;
     template <typename T>
     friend class Async;
     friend internal::PromiseBase;
-    friend Wait;
+    friend MyWait;
 
     void Release(uint64_t id)
     {
@@ -237,6 +261,65 @@ private:
         Stop(id);
     }
 
+    int TypesToIndex(UpdateEnum updateType, TimeEnum timeType)
+    {
+        const int updateIndex = static_cast<int>(updateType);
+        const int timeIndex   = static_cast<int>(timeType);
+        return updateIndex * static_cast<int>(UpdateEnum::Count) + timeIndex;
+    }
+
+    internal::TimeQueue<MyWait*>& GetUpdateQueue(UpdateEnum updateType, TimeEnum timeType)
+    {
+        int queueIndex = TypesToIndex(updateType, timeType);
+        return mExecuteQueues[queueIndex];
+    }
+
+    std::function<double()>& GetCustomTimer(UpdateEnum updateType, TimeEnum timeType)
+    {
+        int queueIndex = TypesToIndex(updateType, timeType);
+        return mCustomTimers[queueIndex];
+    }
+
+    static double defaultTimer()
+    {
+        using Clock     = std::chrono::steady_clock;
+        using TimePoint = Clock::time_point;
+
+        static TimePoint                    startTime = Clock::now();
+        const std::chrono::duration<double> diff      = Clock::now() - startTime;
+        return diff.count();
+    }
+
+    double GetCurrentTime(UpdateEnum updateType, TimeEnum timeType)
+    {
+        auto& customTimer = GetCustomTimer(updateType, timeType);
+        if (customTimer)
+        {
+            return customTimer();
+        }
+        else
+        {
+            return defaultTimer();
+        }
+    }
+
+    using WaitIter = typename internal::TimeQueue<MyWait*>::Iterator;
+    WaitIter AddWait(MyWait* wait, UpdateEnum updateType, TimeEnum timeType)
+    {
+        auto& timeQueue = GetUpdateQueue(updateType, timeType);
+
+        double executeTime = 0;
+        if (wait->mDelay != 0)
+            executeTime = GetCurrentTime(updateType, timeType) + wait->mDelay;
+        return timeQueue.AddTimed(executeTime, wait);
+    }
+
+    void RemoveWait(WaitIter waitHandle, UpdateEnum updateType, TimeEnum timeType)
+    {
+        auto& timeQueue = GetUpdateQueue(updateType, timeType);
+        timeQueue.Remove(waitHandle);
+    }
+
     struct Entry
     {
         internal::TmplAny<Async>                  coro;
@@ -246,16 +329,17 @@ private:
         std::any                                  returnValue;
     };
 
-    std::unordered_map<uint64_t, Entry> mCoroutines;
-    uint64_t                            mNextId{1};
-    internal::TimeQueue<Wait*>          mExecuteQueue;
-    std::shared_ptr<std::monostate>     mLiveSignal;
+    std::unordered_map<uint64_t, Entry>                        mCoroutines;
+    uint64_t                                                   mNextId{1};
+    std::array<internal::TimeQueue<MyWait*>, UpdateQueueCount> mExecuteQueues;
+    std::array<std::function<double()>, UpdateQueueCount>      mCustomTimers;
+    std::shared_ptr<std::monostate>                            mLiveSignal;
 };
 
 // Handle functions
 //
-template <typename T>
-Handle<T>::Handle(Handle&& other)
+template <typename T, typename UpdateEnum, typename TimeEnum>
+Handle<T, UpdateEnum, TimeEnum>::Handle(Handle&& other)
     : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
 {
     other.mId        = 0;
@@ -263,8 +347,8 @@ Handle<T>::Handle(Handle&& other)
     other.mSchedulerLiveSignal.reset();
 }
 
-template <typename T>
-Handle<T>::~Handle()
+template <typename T, typename UpdateEnum, typename TimeEnum>
+Handle<T, UpdateEnum, TimeEnum>::~Handle()
 {
     if (mId != 0 && !mSchedulerLiveSignal.expired())
     {
@@ -272,62 +356,71 @@ Handle<T>::~Handle()
     }
 }
 
-template <typename T>
-bool Handle<T>::IsDown() const noexcept
+template <typename T, typename UpdateEnum, typename TimeEnum>
+bool Handle<T, UpdateEnum, TimeEnum>::IsDown() const noexcept
 {
     return mSchedulerLiveSignal.expired() || mScheduler->IsDown(mId);
 }
 
-template <typename T>
-void Handle<T>::Stop() const noexcept
+template <typename T, typename UpdateEnum, typename TimeEnum>
+void Handle<T, UpdateEnum, TimeEnum>::Stop() const noexcept
 {
     if (!mSchedulerLiveSignal.expired())
         mScheduler->Stop(mId);
 }
 
-template <typename T>
-std::optional<T> Handle<T>::GetReturn() const noexcept
+template <typename T, typename UpdateEnum, typename TimeEnum>
+std::optional<T> Handle<T, UpdateEnum, TimeEnum>::GetReturn() const noexcept
     requires(!std::is_void_v<T>)
 {
     if (mSchedulerLiveSignal.expired())
         return std::nullopt;
-    return mScheduler->GetReturn<T>(mId);
+    return mScheduler->template GetReturn<T>(mId);
 }
 
 // TimeAwaiter functions
 //
-template <typename T>
-void Wait::await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept
-{
-    mHandle  = std::coroutine_handle<internal::PromiseBase>::from_address(handle.address());
-    mExeIter = mHandle.promise().GetScheduler()->mExecuteQueue.AddTimed(mWhen, this);
-}
-
-inline Wait::Wait(double sec)
-    : mWhen(internal::Clock::now() + std::chrono::duration_cast<internal::ClockDuration>(std::chrono::duration<double>(sec)))
+template <typename UpdateEnum, typename TimeEnum>
+Wait<UpdateEnum, TimeEnum>::Wait(double sec, UpdateEnum updateType, TimeEnum timeType)
+    : mDelay(sec),
+      mUpdateType(updateType), mTimeType(timeType)
 {
 }
 
-inline Wait::Wait() : mWhen(internal::TimePoint::min())
+template <typename UpdateEnum, typename TimeEnum>
+Wait<UpdateEnum, TimeEnum>::Wait(UpdateEnum updateType, TimeEnum timeType)
+    : mDelay(0), mUpdateType(updateType), mTimeType(timeType)
 {
 }
 
-inline Wait::~Wait()
+template <typename UpdateEnum, typename TimeEnum>
+Wait<UpdateEnum, TimeEnum>::~Wait()
 {
     if (mExeIter.has_value())
-        mHandle.promise().GetScheduler()->mExecuteQueue.Remove(*mExeIter);
+        mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->RemoveWait(*mExeIter, mUpdateType, mTimeType);
 }
 
-inline bool Wait::await_ready() const noexcept
+template <typename UpdateEnum, typename TimeEnum>
+bool Wait<UpdateEnum, TimeEnum>::await_ready() const noexcept
 {
     return false;
 }
 
-inline void Wait::await_resume() const noexcept
+template <typename UpdateEnum, typename TimeEnum>
+template <typename T>
+void Wait<UpdateEnum, TimeEnum>::await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept
+{
+    mHandle  = std::coroutine_handle<internal::PromiseBase>::from_address(handle.address());
+    mExeIter = mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->AddWait(this, mUpdateType, mTimeType);
+}
+
+template <typename UpdateEnum, typename TimeEnum>
+void Wait<UpdateEnum, TimeEnum>::await_resume() const noexcept
 {
 }
 
-inline void Wait::Resume()
+template <typename UpdateEnum, typename TimeEnum>
+void Wait<UpdateEnum, TimeEnum>::Resume()
 {
     assert(mHandle && !mHandle.done() && mExeIter.has_value());
     // mExeIter has been removed from mExecuteQueue before enter Resume().
@@ -335,8 +428,9 @@ inline void Wait::Resume()
     mHandle.resume();
 }
 
+template <typename UpdateEnum, typename TimeEnum>
 template <typename T>
-std::optional<T> Scheduler::GetReturn(uint64_t id)
+std::optional<T> Scheduler<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
 {
     return std::any_cast<T>(mCoroutines[id].returnValue);
 }
@@ -496,12 +590,6 @@ public:
         }
     }
 };
-
-static Scheduler& GlobalScheduler()
-{
-    static Scheduler s;
-    return s;
-}
 
 } // namespace tokoro
 

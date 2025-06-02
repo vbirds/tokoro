@@ -14,10 +14,10 @@ class TimeQueue
 private:
     struct Node
     {
-        TimePoint time;
-        uint32_t  seq;
-        uint32_t  frame;
-        T         value;
+        double   time;
+        uint32_t seq;
+        uint32_t frame;
+        T        value;
     };
 
     struct Comp
@@ -26,7 +26,8 @@ private:
         {
             if (a.time != b.time)
                 return a.time < b.time;
-            return a.seq < b.seq;
+            else
+                return a.seq < b.seq;
         }
     };
 
@@ -46,15 +47,10 @@ public:
         mAddOrder   = 0;
         mAddFrame   = 0;
         mUpdatePtr  = mSet.end();
-        mCurExeTime = TimePoint::min();
+        mCurExeTime = 0;
     }
 
-    Iterator Add(const T& e)
-    {
-        return AddImpl(TimePoint::min(), e);
-    }
-
-    Iterator AddTimed(const TimePoint& time, const T& e)
+    Iterator AddTimed(const double time, const T& e)
     {
         return AddImpl(time, e);
     }
@@ -89,7 +85,7 @@ public:
         return !mSet.empty() && mSet.end() != mUpdatePtr;
     }
 
-    void SetupUpdate(TimePoint exeTime)
+    void SetupUpdate(double exeTime)
     {
         mAddFrame++;
         mAddOrder   = 0;
@@ -123,17 +119,17 @@ private:
         }
     }
 
-    Iterator AddImpl(const TimePoint& time, const T& e)
+    Iterator AddImpl(double time, const T& e)
     {
         Node node{time, mAddOrder++, mAddFrame, e};
         return mSet.insert(std::move(node));
     }
 
-    SetType   mSet;
-    uint32_t  mAddOrder = 0;
-    uint32_t  mAddFrame = 0;
-    Iterator  mUpdatePtr;
-    TimePoint mCurExeTime;
+    SetType  mSet;
+    uint32_t mAddOrder = 0;
+    uint32_t mAddFrame = 0;
+    Iterator mUpdatePtr;
+    double   mCurExeTime;
 };
 
 } // namespace tokoro::internal
