@@ -145,13 +145,28 @@ private:
     std::coroutine_handle<> mHandle;
 };
 
+namespace internal
+{
+// Helper template for Scheduler
+//
+template <typename Func, typename... Args>
+using AsyncReturnT = std::invoke_result_t<Func, Args...>;
+
+template <typename Func, typename... Args>
+using AsyncValueT = typename AsyncReturnT<Func, Args...>::value_type;
+
+template <typename Func, typename... Args>
+concept ReturnsAsync = std::invocable<Func, Args...> &&
+                       std::same_as<AsyncReturnT<Func, Args...>, Async<AsyncValueT<Func, Args...>>>;
+} // namespace internal
+
 template <typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
 class SchedulerBP
 {
-private:
-    static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
-
 public:
+    template <typename T>
+    using Handle = HandleBP<T, UpdateEnum, TimeEnum>;
+
     SchedulerBP()
     {
         mLiveSignal = std::make_shared<std::monostate>();
@@ -167,14 +182,21 @@ public:
         }
     }
 
+    // SetCustomTimer: Set custom timer for specific time type to replace default realtime timer.
     void SetCustomTimer(TimeEnum timeType, std::function<double()> getTimeFunc)
     {
         mCustomTimers[static_cast<int>(timeType)] = std::move(getTimeFunc);
     }
 
-    template <typename Task, typename... Args, typename RetType = typename std::decay_t<std::invoke_result_t<Task, Args...>>::value_type>
-    HandleBP<RetType, UpdateEnum, TimeEnum> Start(Task&& task, Args&&... args)
+    /// Start: start a coroutine and return its handle.
+    /// func: Callable object that returns Async<T>. Could be a lambda or function.
+    /// funcArgs: parameters of AsyncFunc£¬Start will forward them to construct the coroutine.
+    template <typename AsyncFunc, typename... Args>
+        requires internal::ReturnsAsync<AsyncFunc, Args...>
+    Handle<internal::AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
     {
+        using RetType = internal::AsyncValueT<AsyncFunc, Args...>;
+
         uint64_t id          = mNextId++;
         auto [iter, succeed] = mCoroutines.emplace(id, Entry());
 
@@ -183,7 +205,7 @@ public:
         // Cache the input function and parameters into a lambda to avoid the famous C++ coroutine pitfall.
         // https://devblogs.microsoft.com/oldnewthing/20211103-00/?p=105870
         // <A capturing lambda can be a coroutine, but you have to save your captures while you still can>
-        newEntry.lambda = [task = std::forward<Task>(task), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+        newEntry.lambda = [task = std::forward<AsyncFunc>(func), tup = std::make_tuple(std::forward<Args>(funcArgs)...)]() mutable {
             return std::apply(task, tup);
         };
 
@@ -197,7 +219,7 @@ public:
         // Kick off the coroutine.
         newCoro.Resume();
 
-        return HandleBP<RetType, UpdateEnum, TimeEnum>{id, this, mLiveSignal};
+        return Handle<RetType>{id, this, mLiveSignal};
     }
 
     void Update(UpdateEnum updateType = UpdateEnum::Update,
@@ -331,6 +353,8 @@ private:
         bool                                      released = false;
         std::any                                  returnValue;
     };
+
+    static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
 
     std::unordered_map<uint64_t, Entry>                                    mCoroutines;
     uint64_t                                                               mNextId{1};
