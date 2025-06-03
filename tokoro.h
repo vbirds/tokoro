@@ -599,6 +599,12 @@ using Wait      = WaitBP<internal::PresetUpdateType, internal::PresetTimeType>;
 template <typename T>
 using Handle = HandleBP<T, internal::PresetUpdateType, internal::PresetTimeType>;
 
+static Scheduler& GlobalScheduler()
+{
+    static Scheduler s;
+    return s;
+}
+
 } // namespace tokoro
 
 #include "promise.inl"

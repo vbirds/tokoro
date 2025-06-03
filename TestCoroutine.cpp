@@ -287,12 +287,6 @@ void TestStartInCoroutine()
     std::cout << "TestStartInCoroutine passed\n";
 }
 
-static Scheduler& GlobalScheduler()
-{
-    static Scheduler s;
-    return s;
-}
-
 // Test global scheduler and GetReturn
 void TestGlobalScheduler()
 {
