@@ -134,53 +134,6 @@ Async<int> Fib(int n)
     co_return ra + rb;
 }
 
-// Stress test: spawn many coroutines computing Fibonacci and cancel some
-void TestStress(size_t count, int fibN)
-{
-    Scheduler                sched;
-    std::vector<Handle<int>> handles;
-    handles.reserve(count);
-
-    // Start coroutines
-    for (size_t i = 0; i < count; ++i)
-    {
-        auto h = sched.Start([fibN]() -> Async<int> {
-            co_return co_await Fib(fibN);
-        });
-        handles.push_back(std::move(h));
-    }
-
-    // Cancel half
-    for (size_t i = 0; i < count; i += 2)
-    {
-        handles[i].Stop();
-    }
-
-    // Drive scheduler until remaining complete or timeout
-    auto done = [&]() {
-        for (size_t i = 1; i < count; i += 2)
-        {
-            if (!handles[i].IsDown())
-                return false;
-        }
-        return true;
-    };
-    for (int iter = 0; iter < 10000000 && !done(); ++iter)
-    {
-        sched.Update();
-    }
-    assert(done() && "Scheduler did not finish in time");
-
-    // Verify results
-    for (size_t i = 1; i < count; i += 2)
-    {
-        auto r = handles[i].GetReturn();
-        assert(r.has_value());
-        // Fibonacci correctness for small fibN
-    }
-    std::cout << "TestStress(" << count << ", " << fibN << ") passed\n";
-}
-
 // Test NextFrame ordering
 void TestNextFrame()
 {
@@ -451,6 +404,53 @@ void TestCustomUpdateAndTimers()
     // task should finish in time
     assert(handle.IsDown());
     std::cout << "TestCustomUpdateAndTimers passed\n";
+}
+
+// Stress test: spawn many coroutines computing Fibonacci and cancel some
+void TestStress(size_t count, int fibN)
+{
+    Scheduler                sched;
+    std::vector<Handle<int>> handles;
+    handles.reserve(count);
+
+    // Start coroutines
+    for (size_t i = 0; i < count; ++i)
+    {
+        auto h = sched.Start([fibN]() -> Async<int> {
+            co_return co_await Fib(fibN);
+        });
+        handles.push_back(std::move(h));
+    }
+
+    // Cancel half
+    for (size_t i = 0; i < count; i += 2)
+    {
+        handles[i].Stop();
+    }
+
+    // Drive scheduler until remaining complete or timeout
+    auto done = [&]() {
+        for (size_t i = 1; i < count; i += 2)
+        {
+            if (!handles[i].IsDown())
+                return false;
+        }
+        return true;
+    };
+    for (int iter = 0; iter < 10000000 && !done(); ++iter)
+    {
+        sched.Update();
+    }
+    assert(done() && "Scheduler did not finish in time");
+
+    // Verify results
+    for (size_t i = 1; i < count; i += 2)
+    {
+        auto r = handles[i].GetReturn();
+        assert(r.has_value());
+        // Fibonacci correctness for small fibN
+    }
+    std::cout << "TestStress(" << count << ", " << fibN << ") passed\n";
 }
 
 int main()
