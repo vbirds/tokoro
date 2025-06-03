@@ -3,11 +3,9 @@
 // All function definitions of Promise related classes
 // Put them in the .inl file to avoid compiling order issue.(Depend on CoroAwaiterBase and Scheduler)
 
-#include "promise.h"
-
 #include <cassert>
 
-namespace tokoro::internal
+namespace internal
 {
 
 // PromiseBase::FinalAwaiter functions
@@ -50,7 +48,7 @@ inline std::suspend_always PromiseBase::initial_suspend() noexcept
     return {};
 }
 
-inline auto PromiseBase::final_suspend() noexcept
+inline PromiseBase::FinalAwaiter PromiseBase::final_suspend() noexcept
 {
     return FinalAwaiter{};
 }
@@ -67,13 +65,13 @@ inline void PromiseBase::SetId(uint64_t id)
     mId = id;
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <CountEnum UpdateEnum, CountEnum TimeEnum>
 void PromiseBase::SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler)
 {
     mScheduler = static_cast<void*>(scheduler);
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <CountEnum UpdateEnum, CountEnum TimeEnum>
 SchedulerBP<UpdateEnum, TimeEnum>* PromiseBase::GetScheduler() const
 {
     return static_cast<SchedulerBP<UpdateEnum, TimeEnum>*>(mScheduler);
@@ -121,4 +119,4 @@ inline void Promise<void>::return_void()
 {
 }
 
-} // namespace tokoro::internal
+} // namespace internal

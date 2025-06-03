@@ -8,7 +8,7 @@
 namespace tokoro
 {
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 class SchedulerBP;
 
 namespace internal
@@ -27,14 +27,14 @@ public:
     };
 
     std::suspend_always initial_suspend() noexcept;
-    auto                final_suspend() noexcept;
+    FinalAwaiter        final_suspend() noexcept;
     void                unhandled_exception();
     void                SetId(uint64_t id);
 
-    template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+    template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
     void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler);
 
-    template <typename UpdateEnum = PresetUpdateType, typename TimeEnum = PresetTimeType>
+    template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
     SchedulerBP<UpdateEnum, TimeEnum>* GetScheduler() const;
 
     void SetParentAwaiter(CoroAwaiterBase* awaiter);

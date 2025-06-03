@@ -30,6 +30,13 @@ enum class PresetTimeType : int
     Count,
 };
 
+// Update enums used with tokoro must be
+// 1. Start from 0. The first enum value is also the default value of its kind.
+// 2. Each enum value increment by 1
+// 3. End with enum: Count
+template <typename Enum>
+concept CountEnum = std::is_enum_v<Enum> && requires { Enum::Count; };
+
 template <typename E>
 constexpr E GetEnumDefault()
 {

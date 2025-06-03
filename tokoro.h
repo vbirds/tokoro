@@ -18,10 +18,10 @@
 namespace tokoro
 {
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 class SchedulerBP;
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 class WaitBP
 {
 public:
@@ -114,7 +114,7 @@ public:
 private:
     template <typename U, typename UpdateEnum, typename TimeEnum>
     friend class HandleBP;
-    template <typename UpdateEnum, typename TimeEnum>
+    template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
     friend class SchedulerBP;
     template <typename... Ts>
     friend class All;
@@ -160,7 +160,7 @@ concept ReturnsAsync = std::invocable<Func, Args...> &&
                        std::same_as<AsyncReturnT<Func, Args...>, Async<AsyncValueT<Func, Args...>>>;
 } // namespace internal
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 class SchedulerBP
 {
 public:
@@ -192,7 +192,7 @@ public:
     /// func: Callable object that returns Async<T>. Could be a lambda or function.
     /// funcArgs: parameters of AsyncFunc£¬Start will forward them to construct the coroutine.
     template <typename AsyncFunc, typename... Args>
-        requires internal::ReturnsAsync<AsyncFunc, Args...>
+        requires internal::ReturnsAsync<AsyncFunc, Args...> // Constrain that need function to return Async<T>
     Handle<internal::AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
     {
         using RetType = internal::AsyncValueT<AsyncFunc, Args...>;
@@ -407,33 +407,33 @@ std::optional<T> HandleBP<T, UpdateEnum, TimeEnum>::GetReturn() const noexcept
 
 // TimeAwaiter functions
 //
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 WaitBP<UpdateEnum, TimeEnum>::WaitBP(double sec, UpdateEnum updateType, TimeEnum timeType)
     : mDelay(sec),
       mUpdateType(updateType), mTimeType(timeType)
 {
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 WaitBP<UpdateEnum, TimeEnum>::WaitBP(UpdateEnum updateType, TimeEnum timeType)
     : mDelay(0), mUpdateType(updateType), mTimeType(timeType)
 {
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 WaitBP<UpdateEnum, TimeEnum>::~WaitBP()
 {
     if (mExeIter.has_value())
         mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->RemoveWait(*mExeIter, mUpdateType, mTimeType);
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 bool WaitBP<UpdateEnum, TimeEnum>::await_ready() const noexcept
 {
     return false;
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 template <typename T>
 void WaitBP<UpdateEnum, TimeEnum>::await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept
 {
@@ -441,12 +441,12 @@ void WaitBP<UpdateEnum, TimeEnum>::await_suspend(std::coroutine_handle<internal:
     mExeIter = mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->AddWait(this, mUpdateType, mTimeType);
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 void WaitBP<UpdateEnum, TimeEnum>::await_resume() const noexcept
 {
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 void WaitBP<UpdateEnum, TimeEnum>::Resume()
 {
     assert(mHandle && !mHandle.done() && mExeIter.has_value());
@@ -455,7 +455,7 @@ void WaitBP<UpdateEnum, TimeEnum>::Resume()
     mHandle.resume();
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 template <typename T>
 std::optional<T> SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
 {
@@ -618,7 +618,9 @@ public:
     }
 };
 
-template <typename UpdateEnum, typename TimeEnum>
+#include "promise.inl"
+
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 Async<void> WaitUntilBP(std::function<bool()>&& checkFunc)
 {
     while (!checkFunc())
@@ -627,7 +629,7 @@ Async<void> WaitUntilBP(std::function<bool()>&& checkFunc)
     }
 }
 
-template <typename UpdateEnum, typename TimeEnum>
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 Async<void> WaitWhileBP(std::function<bool()>&& checkFunc)
 {
     while (checkFunc())
@@ -636,6 +638,8 @@ Async<void> WaitWhileBP(std::function<bool()>&& checkFunc)
     }
 }
 
+// Define preset types for quick setup.
+//
 using Scheduler = SchedulerBP<internal::PresetUpdateType, internal::PresetTimeType>;
 using Wait      = WaitBP<internal::PresetUpdateType, internal::PresetTimeType>;
 template <typename T>
@@ -650,5 +654,3 @@ static Scheduler& GlobalScheduler()
 }
 
 } // namespace tokoro
-
-#include "promise.inl"
