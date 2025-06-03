@@ -406,6 +406,27 @@ void TestCustomUpdateAndTimers()
     std::cout << "TestCustomUpdateAndTimers passed\n";
 }
 
+void TestWaitUntilAndWhile()
+{
+    Scheduler sched;
+    int       frame = 0;
+
+    sched.Start([&]() -> Async<void> {
+        co_await WaitUntil([&]() { return frame == 10; });
+        assert(frame == 10);
+
+        co_await WaitWhile([&]() { return frame < 20; });
+        assert(frame == 20);
+    });
+
+    for (; frame < 100; ++frame)
+    {
+        sched.Update();
+    }
+
+    std::cout << "TestWaitUntilAndWhile passed\n";
+}
+
 // Stress test: spawn many coroutines computing Fibonacci and cancel some
 void TestStress(size_t count, int fibN)
 {
@@ -466,6 +487,7 @@ int main()
     TestGlobalScheduler();
     TestTmplAnyMove();
     TestCustomUpdateAndTimers();
+    TestWaitUntilAndWhile();
 
     TestStress(10000, 10);
 

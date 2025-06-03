@@ -594,10 +594,30 @@ public:
     }
 };
 
+template <typename UpdateEnum, typename TimeEnum>
+Async<void> WaitUntilBP(std::function<bool()>&& checkFunc)
+{
+    while (!checkFunc())
+    {
+        co_await WaitBP<UpdateEnum, TimeEnum>(UpdateEnum::Default);
+    }
+}
+
+template <typename UpdateEnum, typename TimeEnum>
+Async<void> WaitWhileBP(std::function<bool()>&& checkFunc)
+{
+    while (checkFunc())
+    {
+        co_await WaitBP<UpdateEnum, TimeEnum>(UpdateEnum::Default);
+    }
+}
+
 using Scheduler = SchedulerBP<internal::PresetUpdateType, internal::PresetTimeType>;
 using Wait      = WaitBP<internal::PresetUpdateType, internal::PresetTimeType>;
 template <typename T>
-using Handle = HandleBP<T, internal::PresetUpdateType, internal::PresetTimeType>;
+using Handle          = HandleBP<T, internal::PresetUpdateType, internal::PresetTimeType>;
+inline auto WaitUntil = WaitUntilBP<internal::PresetUpdateType, internal::PresetTimeType>;
+inline auto WaitWhile = WaitWhileBP<internal::PresetUpdateType, internal::PresetTimeType>;
 
 static Scheduler& GlobalScheduler()
 {
