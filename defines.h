@@ -22,14 +22,18 @@ enum class PresetUpdateType : int
 {
     Update = 0,
     Count,
-    Default = Update,
 };
 
 enum class PresetTimeType : int
 {
     Realtime = 0,
     Count,
-    Default = Realtime,
 };
+
+template <typename E>
+constexpr E GetEnumDefault()
+{
+    return static_cast<E>(0);
+}
 
 } // namespace tokoro::internal

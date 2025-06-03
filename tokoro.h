@@ -21,12 +21,12 @@ namespace tokoro
 template <typename UpdateEnum, typename TimeEnum>
 class SchedulerBP;
 
-template <typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
+template <typename UpdateEnum, typename TimeEnum>
 class WaitBP
 {
 public:
-    WaitBP(double sec, UpdateEnum updateType = UpdateEnum::Default, TimeEnum timeType = TimeEnum::Default);
-    WaitBP(UpdateEnum updateType = UpdateEnum::Default, TimeEnum timeType = TimeEnum::Default);
+    WaitBP(double sec, UpdateEnum updateType = internal::GetEnumDefault<UpdateEnum>(), TimeEnum timeType = internal::GetEnumDefault<TimeEnum>());
+    WaitBP(UpdateEnum updateType = internal::GetEnumDefault<UpdateEnum>(), TimeEnum timeType = internal::GetEnumDefault<TimeEnum>());
     ~WaitBP();
 
     // Functions for C++ coroutine callbacks
@@ -48,7 +48,7 @@ private:
     TimeEnum                                                       mTimeType;
 };
 
-template <typename T, typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
+template <typename T, typename UpdateEnum, typename TimeEnum>
 class HandleBP
 {
 public:
@@ -160,7 +160,7 @@ concept ReturnsAsync = std::invocable<Func, Args...> &&
                        std::same_as<AsyncReturnT<Func, Args...>, Async<AsyncValueT<Func, Args...>>>;
 } // namespace internal
 
-template <typename UpdateEnum = internal::PresetUpdateType, typename TimeEnum = internal::PresetTimeType>
+template <typename UpdateEnum, typename TimeEnum>
 class SchedulerBP
 {
 public:
@@ -623,7 +623,7 @@ Async<void> WaitUntilBP(std::function<bool()>&& checkFunc)
 {
     while (!checkFunc())
     {
-        co_await WaitBP<UpdateEnum, TimeEnum>(UpdateEnum::Default);
+        co_await WaitBP<UpdateEnum, TimeEnum>(internal::GetEnumDefault<UpdateEnum>());
     }
 }
 
@@ -632,7 +632,7 @@ Async<void> WaitWhileBP(std::function<bool()>&& checkFunc)
 {
     while (checkFunc())
     {
-        co_await WaitBP<UpdateEnum, TimeEnum>(UpdateEnum::Default);
+        co_await WaitBP<UpdateEnum, TimeEnum>(internal::GetEnumDefault<UpdateEnum>());
     }
 }
 

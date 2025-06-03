@@ -293,12 +293,10 @@ void TestTmplAnyMove()
 //
 enum class UpdateType
 {
-    PreUpdate = 0,
-    Update,
-
+    Update = 0,
+    PreUpdate,
     PostUpdate,
     Count,
-    Default = Update,
 };
 
 enum class TimeType
@@ -306,7 +304,6 @@ enum class TimeType
     EmuRealTime = 0,
     GameTime,
     Count,
-    Default = EmuRealTime,
 };
 
 // Give alias names for ease of life.
