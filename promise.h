@@ -4,6 +4,7 @@
 
 #include <any>
 #include <coroutine>
+#include <exception>
 
 namespace tokoro
 {
@@ -21,15 +22,16 @@ class PromiseBase
 public:
     struct FinalAwaiter
     {
-        bool await_ready() const noexcept;
-        void await_suspend(std::coroutine_handle<> h) const noexcept;
-        void await_resume() const noexcept;
+        bool                    await_ready() const noexcept;
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) const noexcept;
+        void                    await_resume() const noexcept;
     };
 
     std::suspend_always initial_suspend() noexcept;
     FinalAwaiter        final_suspend() noexcept;
     void                unhandled_exception();
-    void                SetId(uint64_t id);
+
+    void SetId(uint64_t id);
 
     template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
     void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler);
@@ -40,10 +42,11 @@ public:
     void SetParentAwaiter(CoroAwaiterBase* awaiter);
 
 protected:
-    std::any         mReturnValue;
-    uint64_t         mId            = 0;
-    CoroAwaiterBase* mParentAwaiter = nullptr;
-    void*            mScheduler     = nullptr;
+    std::exception_ptr mException;
+    std::any           mReturnValue;
+    uint64_t           mId            = 0;
+    CoroAwaiterBase*   mParentAwaiter = nullptr;
+    void*              mScheduler     = nullptr;
 };
 
 template <typename T>
@@ -66,6 +69,7 @@ public:
 
     auto get_return_object() noexcept;
     void return_void();
+    void GetReturnValue();
 };
 
 } // namespace internal

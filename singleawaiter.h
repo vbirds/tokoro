@@ -33,20 +33,21 @@ public:
         mWaitedHandle.resume(); // Kick off child Async<T>
     }
 
-    auto await_resume() const noexcept
+    T await_resume() const noexcept
         requires(!std::is_void_v<T>)
     {
         return mWaitedHandle.promise().GetReturnValue();
     }
 
-    void await_resume() const noexcept
+    void await_resume() const
         requires(std::is_void_v<T>)
     {
+        mWaitedHandle.promise().GetReturnValue();
     }
 
-    void OnWaitComplete(std::coroutine_handle<> /*unused*/) noexcept override
+    std::coroutine_handle<> OnWaitComplete(std::coroutine_handle<> /*unused*/) noexcept override
     {
-        mParentHandle.resume();
+        return mParentHandle;
     }
 
 private:

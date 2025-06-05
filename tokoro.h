@@ -59,8 +59,11 @@ public:
     bool IsDown() const noexcept;
     void Stop() const noexcept;
 
-    std::optional<T> GetReturn() const noexcept
+    std::optional<T> TakeResult() const
         requires(!std::is_void_v<T>);
+
+    void TakeResult() const
+        requires(std::is_void_v<T>);
 
 private:
     friend class SchedulerBP<UpdateEnum, TimeEnum>;
@@ -250,7 +253,7 @@ private:
         assert(it != mCoroutines.end() && !it->second.released);
 
         it->second.released = true;
-        if (it->second.released && it->second.finished)
+        if (!it->second.running)
             mCoroutines.erase(it);
     }
 
@@ -258,7 +261,7 @@ private:
     {
         const auto it = mCoroutines.find(id);
         assert(it != mCoroutines.end());
-        return it->second.finished;
+        return !it->second.running;
     }
 
     void Stop(uint64_t id)
@@ -266,25 +269,36 @@ private:
         const auto it = mCoroutines.find(id);
         assert(it != mCoroutines.end());
 
-        if (!it->second.finished)
+        if (it->second.running)
         {
-            it->second.finished = true;
+            it->second.running = false;
             it->second.coro.Reset();
             it->second.lambda = {};
 
-            if (it->second.released && it->second.finished)
+            if (it->second.released)
                 mCoroutines.erase(it);
         }
     }
 
     template <typename T>
+        requires(!std::is_void_v<T>)
     std::optional<T> GetReturn(uint64_t id);
 
-    void OnCoroutineFinished(uint64_t id, std::any&& result)
+    template <typename T>
+        requires(std::is_void_v<T>)
+    void GetReturn(uint64_t id);
+
+    void OnCoroutineFinished(uint64_t id)
     {
-        auto& e       = mCoroutines[id];
-        e.returnValue = std::move(result);
-        Stop(id);
+        const auto it = mCoroutines.find(id);
+        Entry&     e  = it->second;
+        assert(it != mCoroutines.end() && e.running);
+
+        e.running = false;
+        e.lambda  = {};
+
+        if (e.released)
+            mCoroutines.erase(it);
     }
 
     int TypesToIndex(UpdateEnum updateType, TimeEnum timeType)
@@ -349,9 +363,8 @@ private:
     {
         internal::TmplAny<Async>                  coro;
         std::function<internal::TmplAny<Async>()> lambda;
-        bool                                      finished = false;
+        bool                                      running  = true;
         bool                                      released = false;
-        std::any                                  returnValue;
     };
 
     static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
@@ -397,12 +410,21 @@ void HandleBP<T, UpdateEnum, TimeEnum>::Stop() const noexcept
 }
 
 template <typename T, typename UpdateEnum, typename TimeEnum>
-std::optional<T> HandleBP<T, UpdateEnum, TimeEnum>::GetReturn() const noexcept
+std::optional<T> HandleBP<T, UpdateEnum, TimeEnum>::TakeResult() const
     requires(!std::is_void_v<T>)
 {
     if (mSchedulerLiveSignal.expired())
         return std::nullopt;
     return mScheduler->template GetReturn<T>(mId);
+}
+
+template <typename T, typename UpdateEnum, typename TimeEnum>
+void HandleBP<T, UpdateEnum, TimeEnum>::TakeResult() const
+    requires(std::is_void_v<T>)
+{
+    if (mSchedulerLiveSignal.expired())
+        return;
+    mScheduler->template GetReturn<T>(mId);
 }
 
 // TimeAwaiter functions
@@ -457,9 +479,22 @@ void WaitBP<UpdateEnum, TimeEnum>::Resume()
 
 template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 template <typename T>
+    requires(!std::is_void_v<T>)
 std::optional<T> SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
 {
-    return std::any_cast<T>(mCoroutines[id].returnValue);
+    auto&     coro   = mCoroutines[id].coro;
+    Async<T>& asyncT = coro.template WithTmplArg<T>();
+    return asyncT.GetHandle().promise().GetReturnValue();
+}
+
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
+template <typename T>
+    requires(std::is_void_v<T>)
+void SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
+{
+    auto&        coro   = mCoroutines[id].coro;
+    Async<void>& asyncT = coro.template WithTmplArg<void>();
+    asyncT.GetHandle().promise().GetReturnValue();
 }
 
 //  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
@@ -469,7 +504,6 @@ class All : public internal::CoroAwaiterBase
 {
 private:
     std::tuple<Async<Ts>...>                     mWaitedCoros;
-    std::tuple<internal::RetConvert<Ts>...>      mResults;
     std::size_t                                  mRemainingCount;
     std::coroutine_handle<internal::PromiseBase> mParentHandle;
 
@@ -505,38 +539,37 @@ public:
         resumeWithIndexes(std::index_sequence_for<Ts...>{});
     }
 
-    auto await_resume() noexcept
+    auto await_resume()
     {
-        return mResults;
-    }
+        std::tuple<internal::RetConvert<Ts>...> results;
 
-    void OnWaitComplete(std::coroutine_handle<> h) noexcept override
-    {
-        auto findAndStoreWithIndexes = [this, h]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ([this, h] {
+        auto storeResults = [this, &results]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ([this, &results] {
                 auto& coro = std::get<Is>(mWaitedCoros);
-                if (coro.GetHandle().address() == h.address())
+                using T    = std::tuple_element_t<Is, std::tuple<Ts...>>;
+                if constexpr (std::is_void_v<T>)
                 {
-                    using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
-                    if constexpr (std::is_void_v<T>)
-                    {
-                        std::get<Is>(mResults) = std::monostate{};
-                    }
-                    else
-                    {
-                        using HandleT          = typename Async<T>::handle_type;
-                        auto done              = HandleT::from_address(h.address());
-                        std::get<Is>(mResults) = std::move(done.promise().GetReturnValue());
-                    }
+                    coro.GetHandle().promise().GetReturnValue();
+                    std::get<Is>(results) = std::monostate{};
+                }
+                else
+                {
+                    std::get<Is>(results) = std::move(coro.GetHandle().promise().GetReturnValue());
                 }
             }(),
              ...);
         };
 
-        findAndStoreWithIndexes(std::index_sequence_for<Ts...>{});
+        storeResults(std::index_sequence_for<Ts...>{});
+        return std::move(results);
+    }
 
+    std::coroutine_handle<> OnWaitComplete(std::coroutine_handle<> h) noexcept override
+    {
         if (--mRemainingCount == 0)
-            mParentHandle.resume();
+            return mParentHandle;
+        else
+            return std::noop_coroutine();
     }
 };
 
@@ -546,14 +579,14 @@ template <typename... Ts>
 class Any : public internal::CoroAwaiterBase
 {
 private:
-    std::tuple<Async<Ts>...>                               mWaitedCoros;
+    std::optional<std::tuple<Async<Ts>...>>                mWaitedCoros;
+    std::coroutine_handle<>                                mFirstFinish;
     std::tuple<std::optional<internal::RetConvert<Ts>>...> mResults;
-    bool                                                   mTriggered{false};
     std::coroutine_handle<internal::PromiseBase>           mParentHandle;
 
 public:
     Any(Async<Ts>&&... cs)
-        : mWaitedCoros(std::move(cs)...), mResults()
+        : mWaitedCoros(std::tuple<Async<Ts>...>(std::move(cs)...)), mResults()
     {
     }
 
@@ -569,7 +602,7 @@ public:
 
         auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([this] {
-                auto& coro    = std::get<Is>(mWaitedCoros);
+                auto& coro    = std::get<Is>(mWaitedCoros.value());
                 auto  handle  = coro.GetHandle();
                 auto& promise = handle.promise();
                 promise.SetScheduler(mParentHandle.promise().GetScheduler());
@@ -581,44 +614,47 @@ public:
         resumeWithIndexes(std::index_sequence_for<Ts...>{});
     }
 
-    auto await_resume() noexcept
+    auto await_resume()
     {
+        auto checkStoreWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ([this] {
+                auto& coro = std::get<Is>(mWaitedCoros.value());
+                if (coro.GetHandle().address() != mFirstFinish.address())
+                    return;
+
+                using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
+                if constexpr (std::is_void_v<T>)
+                {
+                    // To trigger the exception if any
+                    coro.GetHandle().promise().GetReturnValue();
+                    std::get<Is>(mResults) = std::monostate{};
+                }
+                else
+                {
+                    std::get<Is>(mResults) = std::move(coro.GetHandle().promise().GetReturnValue());
+                }
+            }(),
+             ...);
+        };
+        checkStoreWithIndexes(std::index_sequence_for<Ts...>{});
+
+        mWaitedCoros.reset();
         return mResults;
     }
 
-    void OnWaitComplete(std::coroutine_handle<> h) noexcept override
+    std::coroutine_handle<> OnWaitComplete(std::coroutine_handle<> h) noexcept override
     {
-        if (!mTriggered)
-        {
-            auto checkStoreWithIndexes = [this, h]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ([this, h] {
-                    auto& coro = std::get<Is>(mWaitedCoros);
-                    if (coro.GetHandle().address() != h.address())
-                        return;
-
-                    using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
-                    if constexpr (std::is_void_v<T>)
-                    {
-                        std::get<Is>(mResults) = std::monostate{};
-                    }
-                    else
-                    {
-                        using HandleT          = typename Async<T>::handle_type;
-                        auto done              = HandleT::from_address(h.address());
-                        std::get<Is>(mResults) = std::move(done.promise().GetReturnValue());
-                    }
-                }(),
-                 ...);
-            };
-            checkStoreWithIndexes(std::index_sequence_for<Ts...>{});
-
-            mTriggered = true;
-            mParentHandle.resume();
-        }
+        mFirstFinish = h;
+        return mParentHandle;
     }
 };
 
+} // namespace tokoro
+
 #include "promise.inl"
+
+namespace tokoro
+{
 
 template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 Async<void> WaitUntilBP(std::function<bool()>&& checkFunc)

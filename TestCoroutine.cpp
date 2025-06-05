@@ -199,7 +199,7 @@ void TestUseHandleAfterSchedulerDestroyed()
     }
 
     delete sched;
-    assert(!handle.GetReturn().has_value());
+    assert(!handle.TakeResult().has_value());
     std::cout << "TestUseHandleAfterSchedulerDestroyed passed\n";
 }
 
@@ -254,7 +254,7 @@ void TestGlobalScheduler()
         GlobalScheduler().Update();
     }
     assert(handle.IsDown());
-    auto ret = handle.GetReturn();
+    auto ret = handle.TakeResult();
     assert(ret.has_value() && ret.value() == 123);
     std::cout << "TestGlobalScheduler passed\n";
 }
@@ -424,6 +424,152 @@ void TestWaitUntilAndWhile()
     std::cout << "TestWaitUntilAndWhile passed\n";
 }
 
+Async<void> WaitForFrames(int frameCount)
+{
+    for (int i = 0; i < frameCount; ++i)
+    {
+        co_await Wait();
+    }
+}
+
+void TestThrowException()
+{
+    static constexpr char message1[] = "test coroutine exception!";
+    static constexpr char message2[] = "test nested exception !";
+    static constexpr char message3[] = "test cache nested coro exception!";
+    static constexpr char message4[] = "test throw under any!";
+    static constexpr char message5[] = "test throw under all!";
+
+    Scheduler sched;
+
+    // Test throw from a coro and catch exception from TakeResult.
+    auto h1 = sched.Start([&]() -> Async<int> {
+        co_await Wait();
+        throw std::runtime_error(message1);
+        co_return 1;
+    });
+
+    // Test throw from nested coros and catch exception from TakeResult.
+    auto h2 = sched.Start([&]() -> Async<void> {
+        co_await Wait();
+        co_await []() -> Async<void> {
+            co_await Wait();
+            throw std::runtime_error(message2);
+        }();
+    });
+
+    // Test throw from nested coros and catch in upper coro
+    auto h3 = sched.Start([&]() -> Async<void> {
+        co_await Wait();
+
+        try
+        {
+            co_await []() -> Async<void> {
+                co_await Wait();
+
+                co_await []() -> Async<void> {
+                    co_await Wait();
+                    throw std::runtime_error(message3);
+                }();
+            }();
+        }
+        catch (std::runtime_error e)
+        {
+            const std::string errMsg = e.what();
+            assert(errMsg == message3);
+        }
+    });
+
+    // Test throw exception under any.
+    auto h4 = sched.Start([&]() -> Async<void> {
+        co_await Wait();
+
+        co_await Any(WaitForFrames(10),
+                     WaitForFrames(3),
+                     []() -> Async<void> {
+                         co_await Wait();
+                         throw std::runtime_error(message4);
+                     }());
+    });
+
+    auto h5 = sched.Start([&]() -> Async<void> {
+        co_await Wait();
+
+        co_await All(WaitForFrames(3),
+                     WaitForFrames(3),
+                     []() -> Async<void> {
+                         co_await Wait();
+                         throw std::runtime_error(message5);
+                     }());
+    });
+
+    // The game loop
+    for (int i = 0; i < 5; ++i)
+    {
+        sched.Update();
+    }
+
+    try
+    {
+        auto ret = h1.TakeResult();
+        // The code should never reach here because exception rethrow by GetReturn();
+        assert(false); // LCOV_EXCL_LINE
+    }
+    catch (std::runtime_error e)
+    {
+        const std::string errMsg = e.what();
+        assert(errMsg == message1);
+    }
+
+    try
+    {
+        h2.TakeResult();
+        // The code should never reach here because exception rethrow by GetReturn();
+        assert(false); // LCOV_EXCL_LINE
+    }
+    catch (std::runtime_error e)
+    {
+        const std::string errMsg = e.what();
+        assert(errMsg == message2);
+    }
+
+    try
+    {
+        h3.TakeResult();
+    }
+    catch (std::runtime_error e) // LCOV_EXCL_LINE
+    {
+        // The code should never reach here because the exception has been catch in the root coroutine.
+        assert(false); // LCOV_EXCL_LINE
+    } // LCOV_EXCL_LINE
+
+    try
+    {
+        h4.TakeResult();
+        // The code should never reach here because exception rethrow by GetReturn();
+        assert(false); // LCOV_EXCL_LINE
+    }
+    catch (std::runtime_error e)
+    {
+        const std::string errMsg = e.what();
+        assert(errMsg == message4);
+    }
+
+    try
+    {
+        h5.TakeResult();
+        // The code should never reach here because exception rethrow by GetReturn();
+        assert(false); // LCOV_EXCL_LINE
+    }
+    catch (std::runtime_error e)
+    {
+        const std::string errMsg = e.what();
+        assert(errMsg == message5);
+    }
+
+    std::cout << "TestThrowException passed\n";
+}
+
 // Stress test: spawn many coroutines computing Fibonacci and cancel some
 void TestStress(size_t count, int fibN)
 {
@@ -464,7 +610,7 @@ void TestStress(size_t count, int fibN)
     // Verify results
     for (size_t i = 1; i < count; i += 2)
     {
-        auto r = handles[i].GetReturn();
+        auto r = handles[i].TakeResult();
         assert(r.has_value());
         // Fibonacci correctness for small fibN
     }
@@ -485,6 +631,7 @@ int main()
     TestTmplAnyMove();
     TestCustomUpdateAndTimers();
     TestWaitUntilAndWhile();
+    TestThrowException();
 
     TestStress(10000, 10);
 

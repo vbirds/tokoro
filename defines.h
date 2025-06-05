@@ -10,8 +10,9 @@ namespace tokoro::internal
 class CoroAwaiterBase
 {
 public:
-    virtual void OnWaitComplete(std::coroutine_handle<>) noexcept = 0;
-    virtual ~CoroAwaiterBase()                                    = default;
+    virtual std::coroutine_handle<> OnWaitComplete(std::coroutine_handle<>) noexcept = 0;
+
+    virtual ~CoroAwaiterBase() = default;
 };
 
 // map void to std::monostate

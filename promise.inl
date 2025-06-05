@@ -5,7 +5,7 @@
 
 #include <cassert>
 
-namespace internal
+namespace tokoro::internal
 {
 
 // PromiseBase::FinalAwaiter functions
@@ -21,23 +21,24 @@ inline void PromiseBase::FinalAwaiter::await_resume() const noexcept
 }
 // LCOV_EXCL_STOP
 
-inline void PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
+inline std::coroutine_handle<> PromiseBase::FinalAwaiter::await_suspend(std::coroutine_handle<> h) const noexcept
 {
     auto             handle        = std::coroutine_handle<PromiseBase>::from_address(h.address());
     auto&            promise       = handle.promise();
     const uint64_t   coroId        = promise.mId;
     CoroAwaiterBase* parentAwaiter = promise.mParentAwaiter;
 
-    // Can't have awaiter and coroId both.
-    assert(parentAwaiter == nullptr || coroId == 0);
+    assert(parentAwaiter != nullptr || coroId != 0 && "A coro should have parent awaiter or coroId.");
+    assert(parentAwaiter == nullptr || coroId == 0 && "Coro can't have bother parent and coroId.");
 
     if (parentAwaiter != nullptr)
     {
-        parentAwaiter->OnWaitComplete(h);
+        return parentAwaiter->OnWaitComplete(h);
     }
-    else if (coroId != 0)
+    else
     {
-        promise.GetScheduler()->OnCoroutineFinished(coroId, std::move(promise.mReturnValue));
+        promise.GetScheduler()->OnCoroutineFinished(coroId);
+        return std::noop_coroutine();
     }
 }
 
@@ -53,12 +54,10 @@ inline PromiseBase::FinalAwaiter PromiseBase::final_suspend() noexcept
     return FinalAwaiter{};
 }
 
-// LCOV_EXCL_START TODO wait until exception implement.
 inline void PromiseBase::unhandled_exception()
 {
-    std::terminate();
+    mException = std::current_exception();
 }
-// LCOV_EXCL_STOP
 
 inline void PromiseBase::SetId(uint64_t id)
 {
@@ -105,6 +104,11 @@ void Promise<T>::return_value(const T& val)
 template <typename T>
 T& Promise<T>::GetReturnValue()
 {
+    if (this->mException)
+    {
+        std::rethrow_exception(this->mException);
+    }
+
     return *std::any_cast<T>(&this->mReturnValue);
 }
 
@@ -119,4 +123,12 @@ inline void Promise<void>::return_void()
 {
 }
 
-} // namespace internal
+inline void Promise<void>::GetReturnValue()
+{
+    if (this->mException)
+    {
+        std::rethrow_exception(this->mException);
+    }
+}
+
+} // namespace tokoro::internal
