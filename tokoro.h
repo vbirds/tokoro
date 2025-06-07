@@ -701,10 +701,4 @@ using Handle          = HandleBP<T, internal::PresetUpdateType, internal::Preset
 inline auto WaitUntil = WaitUntilBP<internal::PresetUpdateType, internal::PresetTimeType>;
 inline auto WaitWhile = WaitWhileBP<internal::PresetUpdateType, internal::PresetTimeType>;
 
-static Scheduler& GlobalScheduler()
-{
-    static Scheduler s;
-    return s;
-}
-
 } // namespace tokoro
