@@ -188,18 +188,26 @@ void TestUseHandleAfterSchedulerDestroyed()
 {
     Scheduler* sched = new Scheduler();
 
-    auto handle = sched->Start([&]() -> Async<int> {
+    auto h1 = sched->Start([&]() -> Async<int> {
         co_await Wait(0.00000000001);
         co_return 123;
     });
 
-    for (int iter = 0; iter < 1000000000 && !handle.IsDown(); ++iter)
+    auto h2 = sched->Start([&]() -> Async<void> {
+        co_await Wait(0.00000000001);
+        co_return;
+    });
+
+    for (int iter = 0; iter < 1000000000 && !h1.IsDown(); ++iter)
     {
         sched->Update();
     }
 
     delete sched;
-    assert(!handle.TakeResult().has_value());
+    assert(!h1.TakeResult().has_value());
+    // Call Async<void>'s TakeResult() to check whether it works as expect.
+    // It returns nothing but can throw exceptions if there is.
+    h2.TakeResult();
     std::cout << "TestUseHandleAfterSchedulerDestroyed passed\n";
 }
 
