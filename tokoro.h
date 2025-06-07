@@ -270,15 +270,13 @@ private:
     {
         const auto it = mCoroutines.find(id);
         assert(it != mCoroutines.end());
+        assert(!it->second.released && "Coroutines should not be released, if their handle is trying to stop (Handle still alive).");
 
         if (it->second.running)
         {
             it->second.running = false;
             it->second.coro.Reset();
             it->second.lambda = {};
-
-            if (it->second.released)
-                mCoroutines.erase(it);
         }
     }
 
