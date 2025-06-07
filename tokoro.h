@@ -234,6 +234,8 @@ public:
         while (timeQueue.CheckUpdate())
         {
             timeQueue.Pop()->Resume();
+
+            StopNewFinishedCoro();
         }
     }
 
@@ -290,8 +292,24 @@ private:
 
     void OnCoroutineFinished(uint64_t id)
     {
-        const auto it = mCoroutines.find(id);
-        Entry&     e  = it->second;
+        // Because delete root coroutine inside FinalAwaiter::await_suspend() will delete
+        // the return value receiver of await_suspend() too. Which will lead to use after free
+        // issue for 'return std::noop_coroutine();'. So add a delay release mechanic for scheduler
+        // managed coroutines.
+
+        assert(id != 0 && "id parameter should never be invalid in this method.");
+        assert(mNewFinishedCoro == 0 && "There's already a coro need to be finished. Only one coro at max should be finished in one awaiter resume.");
+        mNewFinishedCoro = id;
+    }
+
+    void StopNewFinishedCoro()
+    {
+        if (mNewFinishedCoro == 0)
+            return;
+
+        const auto it    = mCoroutines.find(mNewFinishedCoro);
+        mNewFinishedCoro = 0;
+        Entry& e         = it->second;
         assert(it != mCoroutines.end() && e.running);
 
         e.running = false;
@@ -369,8 +387,9 @@ private:
 
     static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
 
-    std::unordered_map<uint64_t, Entry>                                    mCoroutines;
     uint64_t                                                               mNextId{1};
+    std::unordered_map<uint64_t, Entry>                                    mCoroutines;
+    uint64_t                                                               mNewFinishedCoro = 0;
     std::array<internal::TimeQueue<MyWait*>, UpdateQueueCount>             mExecuteQueues;
     std::array<std::function<double()>, static_cast<int>(TimeEnum::Count)> mCustomTimers;
     std::shared_ptr<std::monostate>                                        mLiveSignal;
@@ -482,6 +501,7 @@ template <typename T>
     requires(!std::is_void_v<T>)
 std::optional<T> SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
 {
+    // todo coro should be reset in this method. This method is once only.
     auto&     coro   = mCoroutines[id].coro;
     Async<T>& asyncT = coro.template WithTmplArg<T>();
     return asyncT.GetHandle().promise().GetReturnValue();

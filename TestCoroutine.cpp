@@ -458,6 +458,9 @@ void TestThrowException()
         }();
     });
 
+    // Skip this test with clang on windows:
+    // https://github.com/llvm/llvm-project/issues/143235
+#if !(defined(_WIN32) && defined(__clang__))
     // Test throw from nested coros and catch in upper coro
     auto h3 = sched.Start([&]() -> Async<void> {
         co_await Wait();
@@ -479,6 +482,7 @@ void TestThrowException()
             assert(errMsg == message3);
         }
     });
+#endif
 
     // Test throw exception under any.
     auto h4 = sched.Start([&]() -> Async<void> {
@@ -533,6 +537,7 @@ void TestThrowException()
         assert(errMsg == message2);
     }
 
+#if !(defined(_WIN32) && defined(__clang__))
     try
     {
         h3.TakeResult();
@@ -542,6 +547,7 @@ void TestThrowException()
         // The code should never reach here because the exception has been catch in the root coroutine.
         assert(false); // LCOV_EXCL_LINE
     } // LCOV_EXCL_LINE
+#endif
 
     try
     {

@@ -33,9 +33,11 @@ public:
 
     void SetId(uint64_t id);
 
+    // todo remove this, I need a Scheduler base
     template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
     void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler);
 
+    // todo remove this, I need a Scheduler base
     template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
     SchedulerBP<UpdateEnum, TimeEnum>* GetScheduler() const;
 

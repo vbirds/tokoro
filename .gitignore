@@ -14,3 +14,6 @@
 code_coverage_test/
 code_coverage_gcc/
 code_coverage_clang/
+.vscode/
+TestCoroutine/
+x64/
