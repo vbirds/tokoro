@@ -56,7 +56,7 @@ rem    --html --html-details generates detailed HTML report
 rem    --output specifies the output report file
 rem ==========================================================
 echo [*] Generating HTML coverage report
-gcovr -r . --exclude-throw-branches --object-directory "%OUTPUTFOLDER%" --html --html-details --output "%OUTPUTFOLDER%\%HTML_REPORT%"
+gcovr -r . --exclude-throw-branches --exclude-lines-by-pattern "^\s*assert\s*\(" --object-directory "%OUTPUTFOLDER%" --html --html-details --output "%OUTPUTFOLDER%\%HTML_REPORT%"
 if errorlevel 1 (
     echo [!] Failed to generate report, check if gcovr is installed and in PATH
     exit /b 1
