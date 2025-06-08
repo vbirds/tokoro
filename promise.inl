@@ -37,7 +37,7 @@ inline std::coroutine_handle<> PromiseBase::FinalAwaiter::await_suspend(std::cor
     }
     else
     {
-        promise.GetCoroManager()->OnCoroutineFinished(coroId);
+        promise.GetCoroManager()->OnCoroutineFinished(coroId, promise.mException == nullptr);
         return std::noop_coroutine();
     }
 }
@@ -66,12 +66,12 @@ inline void PromiseBase::SetId(uint64_t id)
 
 class CoroManager;
 
-void PromiseBase::SetCoroManager(CoroManager* coroManager)
+inline void PromiseBase::SetCoroManager(CoroManager* coroManager)
 {
     mCoroManager = static_cast<void*>(coroManager);
 }
 
-CoroManager* PromiseBase::GetCoroManager() const
+inline CoroManager* PromiseBase::GetCoroManager() const
 {
     return static_cast<CoroManager*>(mCoroManager);
 }
@@ -79,6 +79,17 @@ CoroManager* PromiseBase::GetCoroManager() const
 inline void PromiseBase::SetParentAwaiter(CoroAwaiterBase* awaiter)
 {
     mParentAwaiter = awaiter;
+}
+
+inline void PromiseBase::RethrowIfAny()
+{
+    if (this->mException)
+    {
+        auto localException = this->mException;
+        this->mException    = nullptr;
+
+        std::rethrow_exception(localException);
+    }
 }
 
 // Promise<T> functions
@@ -102,14 +113,10 @@ void Promise<T>::return_value(const T& val)
 }
 
 template <typename T>
-T& Promise<T>::GetReturnValue()
+T Promise<T>::TakeResult()
 {
-    if (this->mException)
-    {
-        std::rethrow_exception(this->mException);
-    }
-
-    return *std::any_cast<T>(&this->mReturnValue);
+    RethrowIfAny();
+    return std::move(std::any_cast<T>(this->mReturnValue));
 }
 
 // Promise<void> functions
@@ -123,12 +130,9 @@ inline void Promise<void>::return_void()
 {
 }
 
-inline void Promise<void>::GetReturnValue()
+inline void Promise<void>::TakeResult()
 {
-    if (this->mException)
-    {
-        std::rethrow_exception(this->mException);
-    }
+    RethrowIfAny();
 }
 
 } // namespace tokoro::internal

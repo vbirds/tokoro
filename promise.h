@@ -37,6 +37,8 @@ public:
     void SetParentAwaiter(CoroAwaiterBase* awaiter);
 
 protected:
+    void RethrowIfAny();
+
     std::exception_ptr mException;
     std::any           mReturnValue;
     uint64_t           mId            = 0;
@@ -53,7 +55,7 @@ public:
     auto get_return_object() noexcept;
     void return_value(T&& val);
     void return_value(const T& val);
-    T&   GetReturnValue();
+    T    TakeResult();
 };
 
 template <>
@@ -64,7 +66,7 @@ public:
 
     auto get_return_object() noexcept;
     void return_void();
-    void GetReturnValue();
+    void TakeResult();
 };
 
 } // namespace internal

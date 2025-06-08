@@ -36,13 +36,13 @@ public:
     T await_resume() const noexcept
         requires(!std::is_void_v<T>)
     {
-        return mWaitedHandle.promise().GetReturnValue();
+        return std::move(mWaitedHandle.promise().TakeResult());
     }
 
     void await_resume() const
         requires(std::is_void_v<T>)
     {
-        mWaitedHandle.promise().GetReturnValue();
+        mWaitedHandle.promise().TakeResult();
     }
 
     std::coroutine_handle<> OnWaitComplete(std::coroutine_handle<> /*unused*/) noexcept override

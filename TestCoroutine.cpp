@@ -36,7 +36,7 @@ void TestSingleAwaitValue()
     }
     assert(completed && "Scheduler did not finish in time");
     assert(result == 42);
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Succeed);
     std::cout << "TestSingleAwaitValue passed\n";
 }
 
@@ -57,7 +57,7 @@ void TestSingleAwaitVoid()
         sched.Update();
     }
     assert(completed && "Scheduler did not finish in time");
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Succeed);
     std::cout << "TestSingleAwaitVoid passed\n";
 }
 
@@ -85,7 +85,7 @@ void TestAllCombinator()
     }
     assert(completed && "Scheduler did not finish in time");
     assert(a == 1 && b == 2 && c == 3);
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Succeed);
     std::cout << "TestAllCombinator passed\n";
 }
 
@@ -115,7 +115,7 @@ void TestAnyCombinator()
     }
     assert(completed && "Scheduler did not finish in time");
     assert(!a.has_value() && b.has_value() && b.value() == 20);
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Succeed);
     std::cout << "TestAnyCombinator passed\n";
 }
 
@@ -153,7 +153,7 @@ void TestNextFrame()
     assert(count == 1);
     sched.Update(); // second resume
     assert(count == 3);
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Succeed);
     std::cout << "TestNextFrame passed\n";
 }
 
@@ -176,9 +176,9 @@ void TestStop()
         sched.Update();
     assert(loops == 5);
 
-    assert(!h.IsDown());
+    assert(h.GetState().value() == AsyncState::Running);
     h.Stop();
-    assert(h.IsDown());
+    assert(h.GetState().value() == AsyncState::Stopped);
     sched.Update();
     assert(loops == 5);
     std::cout << "TestStop passed\n";
@@ -198,16 +198,24 @@ void TestUseHandleAfterSchedulerDestroyed()
         co_return;
     });
 
-    for (int iter = 0; iter < 1000000000 && !h1.IsDown(); ++iter)
+    for (int iter = 0; iter < 1000000000 && h1.IsRunning(); ++iter)
     {
         sched->Update();
     }
 
+    assert(h1.TakeResult().has_value());
+    assert(h1.GetState().value() == AsyncState::Succeed);
+    assert(h2.GetState().value() == AsyncState::Succeed);
+
     delete sched;
+
     assert(!h1.TakeResult().has_value());
+    assert(!h1.GetState().has_value());
+
     // Call Async<void>'s TakeResult() to check whether it works as expect.
     // It returns nothing but can throw exceptions if there is.
     h2.TakeResult();
+
     std::cout << "TestUseHandleAfterSchedulerDestroyed passed\n";
 }
 
@@ -263,11 +271,11 @@ void TestGlobalScheduler()
     });
 
     // Drive global scheduler until done or timeout
-    for (int iter = 0; iter < 10 && !handle.IsDown(); ++iter)
+    for (int iter = 0; iter < 10 && handle.GetState().value() != AsyncState::Succeed; ++iter)
     {
         GlobalScheduler().Update();
     }
-    assert(handle.IsDown());
+    assert(handle.GetState().value() == AsyncState::Succeed);
     auto ret = handle.TakeResult();
     assert(ret.has_value() && ret.value() == 123);
     std::cout << "TestGlobalScheduler passed\n";
@@ -391,7 +399,7 @@ void TestCustomUpdateAndTimers()
     // Game Loop
     //
     constexpr double frameTime = 0.166666;
-    for (int i = 0; i < 100 && !handle.IsDown(); ++i)
+    for (int i = 0; i < 100 && handle.GetState().value() != AsyncState::Succeed; ++i)
     {
         emuRealTime += frameTime;
         if (!gamePaused)
@@ -411,7 +419,7 @@ void TestCustomUpdateAndTimers()
     }
 
     // task should finish in time
-    assert(handle.IsDown());
+    assert(handle.GetState().value() == AsyncState::Succeed);
     std::cout << "TestCustomUpdateAndTimers passed\n";
 }
 
@@ -588,6 +596,117 @@ void TestThrowException()
     std::cout << "TestThrowException passed\n";
 }
 
+void TestHandle()
+{
+    Handle<int> moveHandle;
+    assert(!moveHandle.IsValid());
+    assert(!moveHandle.IsRunning());
+    assert(!moveHandle.GetState().has_value());
+    assert(!moveHandle.TakeResult().has_value());
+    moveHandle.Stop(); // Nothing will happen
+
+    Handle<void> moveVoidHandle;
+    assert(!moveVoidHandle.IsValid());
+    assert(!moveVoidHandle.IsRunning());
+    assert(!moveVoidHandle.GetState().has_value());
+    moveVoidHandle.TakeResult(); // Nothing will happen
+
+    {
+        Scheduler sched;
+
+        moveHandle = sched.Start([]() -> Async<int> {
+            co_await Wait();
+            co_return 42;
+        });
+
+        assert(moveHandle.IsValid());
+
+        Handle noyieldHandle = sched.Start([]() -> Async<void> {
+            co_return;
+        });
+
+        assert(noyieldHandle.IsValid());
+        assert(!noyieldHandle.IsRunning());
+        assert(noyieldHandle.GetState().has_value());
+        assert(noyieldHandle.GetState().value() == AsyncState::Succeed);
+        noyieldHandle.Stop();
+        assert(noyieldHandle.GetState().value() != AsyncState::Stopped);
+
+        Handle neverEndHandle = sched.Start([]() -> Async<void> {
+            while (true)
+            {
+                co_await Wait();
+            }
+        });
+
+        constexpr static char cstr[] = "hello world";
+
+        Handle retHandle = sched.Start([]() -> Async<std::string> {
+            co_await Wait();
+
+            std::string msg = co_await []() -> Async<std::string> {
+                co_await Wait();
+                co_return cstr;
+            }();
+
+            co_return msg;
+        });
+        assert(!retHandle.TakeResult().has_value());
+
+        constexpr static char err[] = "exceptHandle exception";
+
+        // Immediately exception coroutine test.
+        Handle exceptHandle = sched.Start([]() -> Async<void> {
+            throw std::runtime_error(err);
+            co_return;
+        });
+        assert(!exceptHandle.IsRunning());
+        try
+        {
+            exceptHandle.TakeResult();
+            assert(false && "This line should never execute."); // LCOV_EXCL_LINE
+        }
+        catch (std::runtime_error e)
+        {
+            assert(e.what() == std::string(err));
+        }
+        try
+        {
+            exceptHandle.TakeResult(); // Second TakeResult() call
+        }
+        catch (std::runtime_error e) // LCOV_EXCL_LINE
+        {
+            // Second TakeResult should not have exception throw.
+            assert(false && "This line should never execute."); // LCOV_EXCL_LINE
+        } // LCOV_EXCL_LINE
+
+        for (int i = 0; i < 10; ++i)
+        {
+            sched.Update();
+        }
+
+        assert(!retHandle.IsRunning());
+        assert(retHandle.TakeResult() == cstr);
+        assert(!retHandle.TakeResult().has_value() && "Call TakeResult() on same handle returns nullopt.");
+
+        assert(neverEndHandle.IsValid());
+        assert(neverEndHandle.IsRunning());
+        neverEndHandle.TakeResult(); // Nothing will happen
+        neverEndHandle.Stop();
+        assert(*neverEndHandle.GetState() == AsyncState::Stopped);
+        neverEndHandle.TakeResult(); // Nothing will happen
+
+        assert(moveHandle.GetState().value() == AsyncState::Succeed);
+    }
+
+    assert(!moveHandle.IsRunning());
+    assert(!moveHandle.GetState().has_value() && "Handle became invalid because the scheduler go out of scope.");
+    assert(!moveHandle.TakeResult().has_value());
+    moveHandle.Stop(); // Nothing will happen.
+
+    std::cout << "TestHandle passed\n";
+}
+
 // Stress test: spawn many coroutines computing Fibonacci and cancel some
 void TestStress(size_t count, int fibN)
 {
@@ -614,7 +733,7 @@ void TestStress(size_t count, int fibN)
     auto done = [&]() {
         for (size_t i = 1; i < count; i += 2)
         {
-            if (!handles[i].IsDown())
+            if (handles[i].GetState().value() != AsyncState::Succeed)
                 return false;
         }
         return true;
@@ -650,6 +769,7 @@ int main()
     TestCustomUpdateAndTimers();
     TestWaitUntilAndWhile();
     TestThrowException();
+    TestHandle();
 
     TestStress(10000, 10);
 

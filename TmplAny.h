@@ -160,6 +160,7 @@ public:
     {
         Reset();
     }
+
     void Reset() noexcept
     {
         if (vtable_)

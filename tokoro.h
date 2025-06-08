@@ -53,20 +53,51 @@ namespace internal
 class CoroManager;
 }
 
+enum class AsyncState
+{
+    Running,
+    Succeed,
+    Failed,  // When coroutine threw exception.
+    Stopped, // When coroutine stopped by Handle.
+};
+
 template <typename T>
 class Handle
 {
-public:
-    Handle(Handle&& other);
-    Handle(const Handle& other) = delete;
-    ~Handle();
+    // The tool to control coroutines from outside.
+    // When a Handle go out of scope, the coroutine associate with it will
+    // Keep running to the end. When it succeeds/fails, the coroutine will
+    // be removed.
 
-    bool IsDown() const noexcept;
+public:
+    // Default constructor will create an invalid Handle
+    Handle() noexcept = default;
+    Handle(Handle&& other) noexcept;
+    Handle& operator=(Handle&& other) noexcept;
+    Handle(const Handle& other) = delete; // Handle is not copiable.
+    ~Handle() noexcept;
+
+    // True if handle is not create by Scheduler.
+    bool IsValid() const noexcept;
+
+    // Stop a coroutine when they are running. Or the method will do nothing.
     void Stop() const noexcept;
 
+    // Return nothing if the Scheduler is no longer exist.
+    std::optional<AsyncState> GetState() const noexcept;
+
+    // A quick utility for user to detect whether a coroutine is still running.
+    // Returns false when: !IsValid()/!GetState().have_value()/*GetState() != AsyncState::Running
+    bool IsRunning() const noexcept;
+
+    // Take result out of succeed coroutine.
+    // When a coroutine AsyncState::Failed, it will throw out the exception.
+    // Can only work for once.
     std::optional<T> TakeResult() const
         requires(!std::is_void_v<T>);
 
+    // When a coroutine AsyncState::Failed, this method will throw out the exception.
+    // Can only work for once.
     void TakeResult() const
         requires(std::is_void_v<T>);
 
@@ -203,6 +234,9 @@ public:
         // Kick off the coroutine.
         newCoro.Resume();
 
+        // Check if the new coroutine already stopped running.
+        StopNewFinishedCoro();
+
         return Handle<RetType>{id, this, mLiveSignal};
     }
 
@@ -219,14 +253,18 @@ protected:
 
         const auto it    = mCoroutines.find(mNewFinishedCoro);
         mNewFinishedCoro = 0;
-        Entry& e         = it->second;
-        assert(it != mCoroutines.end() && e.running);
 
-        e.running = false;
-        e.lambda  = {};
+        Entry& e = it->second;
+        assert(it != mCoroutines.end() && e.state == AsyncState::Running);
+
+        e.state  = mNewFinishedSucceed ? AsyncState::Succeed : AsyncState::Failed;
+        e.lambda = {}; // Remove start lambda
 
         if (e.released)
+        {
+            // When coro is stopped running and released by handle, we can delete it.
             mCoroutines.erase(it);
+        }
     }
 
 private:
@@ -242,51 +280,68 @@ private:
         assert(it != mCoroutines.end() && !it->second.released);
 
         it->second.released = true;
-        if (!it->second.running)
+        if (it->second.state != AsyncState::Running)
+        {
+            // When coro is stopped running and released by handle, we can delete it.
             mCoroutines.erase(it);
-    }
-
-    bool IsDown(uint64_t id)
-    {
-        const auto it = mCoroutines.find(id);
-        assert(it != mCoroutines.end());
-        return !it->second.running;
+        }
     }
 
     void Stop(uint64_t id)
     {
         const auto it = mCoroutines.find(id);
         assert(it != mCoroutines.end());
-        assert(!it->second.released && "Coroutines should not be released, if their handle is trying to stop (Handle still alive).");
 
-        if (it->second.running)
+        auto& entry = it->second;
+        assert(!entry.released && "Coroutines should not be released, if their handle is trying to stop (Handle still alive).");
+
+        if (entry.state == AsyncState::Running)
         {
-            it->second.running = false;
-            it->second.coro.Reset();
-            it->second.lambda = {};
+            entry.state = AsyncState::Stopped;
+            entry.coro.Reset(); // Remove the coro
+            entry.lambda = {};  // Remove start lambda
         }
+        else
+        {
+            // When coro already stopped running, do nothing.
+        }
+    }
+
+    AsyncState GetState(uint64_t id)
+    {
+        const auto it = mCoroutines.find(id);
+        assert(it != mCoroutines.end());
+
+        return it->second.state;
     }
 
     template <typename T>
         requires(!std::is_void_v<T>)
-    std::optional<T> GetReturn(uint64_t id)
+    std::optional<T> TakeResult(uint64_t id)
     {
-        // todo coro should be reset in this method. This method is once only.
-        auto&     coro   = mCoroutines[id].coro;
+        auto& entry = mCoroutines[id];
+        if (!entry.coro)
+            return std::nullopt;
+
+        auto      coro   = std::move(entry.coro);
         Async<T>& asyncT = coro.WithTmplArg<T>();
-        return asyncT.GetHandle().promise().GetReturnValue();
+        return std::move(asyncT.GetHandle().promise().TakeResult());
     }
 
     template <typename T>
         requires(std::is_void_v<T>)
-    void GetReturn(uint64_t id)
+    void TakeResult(uint64_t id)
     {
-        auto&        coro   = mCoroutines[id].coro;
+        auto& entry = mCoroutines[id];
+        if (!entry.coro)
+            return;
+
+        auto         coro   = std::move(entry.coro);
         Async<void>& asyncT = coro.WithTmplArg<void>();
-        asyncT.GetHandle().promise().GetReturnValue();
+        asyncT.GetHandle().promise().TakeResult();
     }
 
-    void OnCoroutineFinished(uint64_t id)
+    void OnCoroutineFinished(uint64_t id, bool isSucceed)
     {
         // Because delete root coroutine inside FinalAwaiter::await_suspend() will delete
         // the return value receiver of await_suspend() too. Which will lead to use after free
@@ -296,20 +351,22 @@ private:
         assert(id != 0 && "id parameter should never be invalid in this method.");
         assert(mNewFinishedCoro == 0 && "There's already a coro need to be finished. Only one coro at max should be finished in one awaiter resume.");
 
-        mNewFinishedCoro = id;
+        mNewFinishedCoro    = id;
+        mNewFinishedSucceed = isSucceed;
     }
 
     struct Entry
     {
         TmplAny<Async>                  coro;
         std::function<TmplAny<Async>()> lambda;
-        bool                            running  = true;
+        AsyncState                      state    = AsyncState::Running;
         bool                            released = false;
     };
 
     uint64_t                            mNextId = 1;
     std::unordered_map<uint64_t, Entry> mCoroutines;
-    uint64_t                            mNewFinishedCoro = 0;
+    uint64_t                            mNewFinishedCoro    = 0;
+    bool                                mNewFinishedSucceed = true;
     std::shared_ptr<std::monostate>     mLiveSignal;
 };
 
@@ -422,16 +479,30 @@ private:
 // Handle functions
 //
 template <typename T>
-Handle<T>::Handle(Handle&& other)
-    : mId(other.mId), mCoroMgr(other.mCoroMgr), mCoroMgrLiveSignal(other.mCoroMgrLiveSignal)
+Handle<T>::Handle(Handle&& other) noexcept
+    : mId(other.mId), mCoroMgr(other.mCoroMgr), mCoroMgrLiveSignal(std::move(other.mCoroMgrLiveSignal))
 {
     other.mId      = 0;
     other.mCoroMgr = nullptr;
-    other.mCoroMgrLiveSignal.reset();
 }
 
 template <typename T>
-Handle<T>::~Handle()
+Handle<T>& Handle<T>::operator=(Handle&& other) noexcept
+{
+    if (this != &other)
+    {
+        mId                = other.mId;
+        mCoroMgr           = other.mCoroMgr;
+        mCoroMgrLiveSignal = std::move(other.mCoroMgrLiveSignal);
+
+        other.mId      = 0;
+        other.mCoroMgr = nullptr;
+    }
+    return *this;
+}
+
+template <typename T>
+Handle<T>::~Handle() noexcept
 {
     if (mId != 0 && !mCoroMgrLiveSignal.expired())
     {
@@ -440,34 +511,77 @@ Handle<T>::~Handle()
 }
 
 template <typename T>
-bool Handle<T>::IsDown() const noexcept
+bool Handle<T>::IsValid() const noexcept
 {
-    return mCoroMgrLiveSignal.expired() || mCoroMgr->IsDown(mId);
+    return mId != 0;
 }
 
 template <typename T>
 void Handle<T>::Stop() const noexcept
 {
+    if (!IsValid())
+        return;
+
     if (!mCoroMgrLiveSignal.expired())
         mCoroMgr->Stop(mId);
+}
+
+template <typename T>
+std::optional<AsyncState> Handle<T>::GetState() const noexcept
+{
+    if (!IsValid())
+        return std::nullopt;
+
+    if (!mCoroMgrLiveSignal.expired())
+        return mCoroMgr->GetState(mId);
+    else
+        return std::nullopt;
+}
+
+template <typename T>
+bool Handle<T>::IsRunning() const noexcept
+{
+    if (!IsValid())
+        return false;
+
+    const auto stateHolder = GetState();
+    if (!stateHolder.has_value())
+        return false;
+
+    const auto state = stateHolder.value();
+    return state == AsyncState::Running;
 }
 
 template <typename T>
 std::optional<T> Handle<T>::TakeResult() const
     requires(!std::is_void_v<T>)
 {
+    if (!IsValid())
+        return std::nullopt;
+
     if (mCoroMgrLiveSignal.expired())
         return std::nullopt;
-    return mCoroMgr->template GetReturn<T>(mId);
+
+    if (GetState().value() == AsyncState::Running)
+        return std::nullopt;
+
+    return mCoroMgr->TakeResult<T>(mId);
 }
 
 template <typename T>
 void Handle<T>::TakeResult() const
     requires(std::is_void_v<T>)
 {
+    if (!IsValid())
+        return;
+
     if (mCoroMgrLiveSignal.expired())
         return;
-    mCoroMgr->template GetReturn<T>(mId);
+
+    if (GetState().value() == AsyncState::Running)
+        return;
+
+    mCoroMgr->TakeResult<T>(mId);
 }
 
 // TimeAwaiter functions
@@ -578,12 +692,12 @@ public:
                 using T    = std::tuple_element_t<Is, std::tuple<Ts...>>;
                 if constexpr (std::is_void_v<T>)
                 {
-                    coro.GetHandle().promise().GetReturnValue();
+                    coro.GetHandle().promise().TakeResult();
                     std::get<Is>(results) = std::monostate{};
                 }
                 else
                 {
-                    std::get<Is>(results) = std::move(coro.GetHandle().promise().GetReturnValue());
+                    std::get<Is>(results) = std::move(coro.GetHandle().promise().TakeResult());
                 }
             }(),
              ...);
@@ -655,12 +769,12 @@ public:
                 if constexpr (std::is_void_v<T>)
                 {
                     // To trigger the exception if any
-                    coro.GetHandle().promise().GetReturnValue();
+                    coro.GetHandle().promise().TakeResult();
                     std::get<Is>(mResults) = std::monostate{};
                 }
                 else
                 {
-                    std::get<Is>(mResults) = std::move(coro.GetHandle().promise().GetReturnValue());
+                    std::get<Is>(mResults) = std::move(coro.GetHandle().promise().TakeResult());
                 }
             }(),
              ...);
