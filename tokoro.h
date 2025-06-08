@@ -147,7 +147,7 @@ public:
 
     auto operator co_await() noexcept
     {
-        return internal::SingleCoroAwaiter(GetHandle());
+        return internal::SingleCoroAwaiter(GetCppHandle());
     }
 
 private:
@@ -159,15 +159,15 @@ private:
 
     void SetId(uint64_t id)
     {
-        GetHandle().promise().SetId(id);
+        GetCppHandle().promise().SetId(id);
     }
 
     void SetCoroManager(internal::CoroManager* coroMgr)
     {
-        GetHandle().promise().SetCoroManager(coroMgr);
+        GetCppHandle().promise().SetCoroManager(coroMgr);
     }
 
-    std::coroutine_handle<promise_type> GetHandle()
+    std::coroutine_handle<promise_type> GetCppHandle()
     {
         return std::coroutine_handle<promise_type>::from_address(mHandle.address());
     }
@@ -325,7 +325,7 @@ private:
 
         auto      coro   = std::move(entry.coro);
         Async<T>& asyncT = coro.WithTmplArg<T>();
-        return std::move(asyncT.GetHandle().promise().TakeResult());
+        return std::move(asyncT.GetCppHandle().promise().TakeResult());
     }
 
     template <typename T>
@@ -338,7 +338,7 @@ private:
 
         auto         coro   = std::move(entry.coro);
         Async<void>& asyncT = coro.WithTmplArg<void>();
-        asyncT.GetHandle().promise().TakeResult();
+        asyncT.GetCppHandle().promise().TakeResult();
     }
 
     void OnCoroutineFinished(uint64_t id, bool isSucceed)
@@ -670,7 +670,7 @@ public:
             (
                 [this] {
                     auto& coro    = std::get<Is>(mWaitedCoros);
-                    auto  handle  = coro.GetHandle();
+                    auto  handle  = coro.GetCppHandle();
                     auto& promise = handle.promise();
                     promise.SetCoroManager(mParentHandle.promise().GetCoroManager());
                     promise.SetParentAwaiter(this);
@@ -692,12 +692,12 @@ public:
                 using T    = std::tuple_element_t<Is, std::tuple<Ts...>>;
                 if constexpr (std::is_void_v<T>)
                 {
-                    coro.GetHandle().promise().TakeResult();
+                    coro.GetCppHandle().promise().TakeResult();
                     std::get<Is>(results) = std::monostate{};
                 }
                 else
                 {
-                    std::get<Is>(results) = std::move(coro.GetHandle().promise().TakeResult());
+                    std::get<Is>(results) = std::move(coro.GetCppHandle().promise().TakeResult());
                 }
             }(),
              ...);
@@ -746,7 +746,7 @@ public:
         auto resumeWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([this] {
                 auto& coro    = std::get<Is>(mWaitedCoros.value());
-                auto  handle  = coro.GetHandle();
+                auto  handle  = coro.GetCppHandle();
                 auto& promise = handle.promise();
                 promise.SetCoroManager(mParentHandle.promise().GetCoroManager());
                 promise.SetParentAwaiter(this);
@@ -762,19 +762,19 @@ public:
         auto checkStoreWithIndexes = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([this] {
                 auto& coro = std::get<Is>(mWaitedCoros.value());
-                if (coro.GetHandle().address() != mFirstFinish.address())
+                if (coro.GetCppHandle().address() != mFirstFinish.address())
                     return;
 
                 using T = std::tuple_element_t<Is, std::tuple<Ts...>>;
                 if constexpr (std::is_void_v<T>)
                 {
                     // To trigger the exception if any
-                    coro.GetHandle().promise().TakeResult();
+                    coro.GetCppHandle().promise().TakeResult();
                     std::get<Is>(mResults) = std::monostate{};
                 }
                 else
                 {
-                    std::get<Is>(mResults) = std::move(coro.GetHandle().promise().TakeResult());
+                    std::get<Is>(mResults) = std::move(coro.GetCppHandle().promise().TakeResult());
                 }
             }(),
              ...);
