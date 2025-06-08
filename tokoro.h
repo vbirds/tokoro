@@ -282,11 +282,22 @@ private:
 
     template <typename T>
         requires(!std::is_void_v<T>)
-    std::optional<T> GetReturn(uint64_t id);
+    std::optional<T> GetReturn(uint64_t id)
+    {
+        // todo coro should be reset in this method. This method is once only.
+        auto&     coro   = mCoroutines[id].coro;
+        Async<T>& asyncT = coro.template WithTmplArg<T>();
+        return asyncT.GetHandle().promise().GetReturnValue();
+    }
 
     template <typename T>
         requires(std::is_void_v<T>)
-    void GetReturn(uint64_t id);
+    void GetReturn(uint64_t id)
+    {
+        auto&        coro   = mCoroutines[id].coro;
+        Async<void>& asyncT = coro.template WithTmplArg<void>();
+        asyncT.GetHandle().promise().GetReturnValue();
+    }
 
     void OnCoroutineFinished(uint64_t id)
     {
@@ -492,27 +503,6 @@ void WaitBP<UpdateEnum, TimeEnum>::Resume()
     // mExeIter has been removed from mExecuteQueue before enter Resume().
     mExeIter.reset();
     mHandle.resume();
-}
-
-template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
-template <typename T>
-    requires(!std::is_void_v<T>)
-std::optional<T> SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
-{
-    // todo coro should be reset in this method. This method is once only.
-    auto&     coro   = mCoroutines[id].coro;
-    Async<T>& asyncT = coro.template WithTmplArg<T>();
-    return asyncT.GetHandle().promise().GetReturnValue();
-}
-
-template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
-template <typename T>
-    requires(std::is_void_v<T>)
-void SchedulerBP<UpdateEnum, TimeEnum>::GetReturn(uint64_t id)
-{
-    auto&        coro   = mCoroutines[id].coro;
-    Async<void>& asyncT = coro.template WithTmplArg<void>();
-    asyncT.GetHandle().promise().GetReturnValue();
 }
 
 //  Awaiter for All: waits all, returns tuple<T1, T2, T3 ...>
