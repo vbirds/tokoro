@@ -325,8 +325,6 @@ enum class TimeType
 // Just don't introduce 'using namespace tokoro' to your code.
 using MyScheduler = SchedulerBP<UpdateType, TimeType>;
 using MyWait      = WaitBP<UpdateType, TimeType>;
-template <typename T>
-using MyHandle = HandleBP<T, UpdateType, TimeType>;
 
 void TestCustomUpdateAndTimers()
 {
@@ -346,7 +344,7 @@ void TestCustomUpdateAndTimers()
     UpdateType curUpdateType = UpdateType::PreUpdate;
 
     // Define the test coroutine
-    MyHandle handle = sched.Start([&]() -> Async<void> {
+    Handle handle = sched.Start([&]() -> Async<void> {
         // Check wait in realtime
         co_await MyWait(1);
         assert(emuRealTime >= 1);

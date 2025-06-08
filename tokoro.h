@@ -48,13 +48,18 @@ private:
     TimeEnum                                                       mTimeType;
 };
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-class HandleBP
+namespace internal
+{
+class CoroManager;
+}
+
+template <typename T>
+class Handle
 {
 public:
-    HandleBP(HandleBP&& other);
-    HandleBP(const HandleBP& other) = delete;
-    ~HandleBP();
+    Handle(Handle&& other);
+    Handle(const Handle& other) = delete;
+    ~Handle();
 
     bool IsDown() const noexcept;
     void Stop() const noexcept;
@@ -66,16 +71,16 @@ public:
         requires(std::is_void_v<T>);
 
 private:
-    friend class SchedulerBP<UpdateEnum, TimeEnum>;
+    friend class internal::CoroManager;
 
-    HandleBP(uint64_t id, SchedulerBP<UpdateEnum, TimeEnum>* scheduler, const std::weak_ptr<std::monostate>& liveSignal)
-        : mId(id), mScheduler(scheduler), mSchedulerLiveSignal(liveSignal)
+    Handle(uint64_t id, internal::CoroManager* coroMgr, const std::weak_ptr<std::monostate>& liveSignal)
+        : mId(id), mCoroMgr(coroMgr), mCoroMgrLiveSignal(liveSignal)
     {
     }
 
-    uint64_t                           mId        = 0;
-    SchedulerBP<UpdateEnum, TimeEnum>* mScheduler = nullptr;
-    std::weak_ptr<std::monostate>      mSchedulerLiveSignal;
+    uint64_t                      mId      = 0;
+    internal::CoroManager*        mCoroMgr = nullptr;
+    std::weak_ptr<std::monostate> mCoroMgrLiveSignal;
 };
 
 template <typename... Ts>
@@ -115,24 +120,20 @@ public:
     }
 
 private:
-    template <typename U, typename UpdateEnum, typename TimeEnum>
-    friend class HandleBP;
-    template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
-    friend class SchedulerBP;
     template <typename... Ts>
     friend class All;
     template <typename... Ts>
     friend class Any;
+    friend class internal::CoroManager;
 
     void SetId(uint64_t id)
     {
         GetHandle().promise().SetId(id);
     }
 
-    template <typename UpdateEnum, typename TimeEnum>
-    void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler)
+    void SetCoroManager(internal::CoroManager* coroMgr)
     {
-        GetHandle().promise().SetScheduler(scheduler);
+        GetHandle().promise().SetCoroManager(coroMgr);
     }
 
     std::coroutine_handle<promise_type> GetHandle()
@@ -150,6 +151,7 @@ private:
 
 namespace internal
 {
+
 // Helper template for Scheduler
 //
 template <typename Func, typename... Args>
@@ -161,34 +163,13 @@ using AsyncValueT = typename AsyncReturnT<Func, Args...>::value_type;
 template <typename Func, typename... Args>
 concept ReturnsAsync = std::invocable<Func, Args...> &&
                        std::same_as<AsyncReturnT<Func, Args...>, Async<AsyncValueT<Func, Args...>>>;
-} // namespace internal
 
-template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
-class SchedulerBP
+class CoroManager
 {
 public:
-    template <typename T>
-    using Handle = HandleBP<T, UpdateEnum, TimeEnum>;
-
-    SchedulerBP()
+    CoroManager()
     {
         mLiveSignal = std::make_shared<std::monostate>();
-    }
-
-    ~SchedulerBP()
-    {
-        mCoroutines.clear();
-
-        for (auto& queue : mExecuteQueues)
-        {
-            queue.Clear();
-        }
-    }
-
-    // SetCustomTimer: Set custom timer for specific time type to replace default realtime timer.
-    void SetCustomTimer(TimeEnum timeType, std::function<double()> getTimeFunc)
-    {
-        mCustomTimers[static_cast<int>(timeType)] = std::move(getTimeFunc);
     }
 
     /// Start: start a coroutine and return its handle.
@@ -196,9 +177,9 @@ public:
     /// funcArgs: parameters of AsyncFunc£¬Start will forward them to construct the coroutine.
     template <typename AsyncFunc, typename... Args>
         requires internal::ReturnsAsync<AsyncFunc, Args...> // Constrain that need function to return Async<T>
-    Handle<internal::AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
+    Handle<AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
     {
-        using RetType = internal::AsyncValueT<AsyncFunc, Args...>;
+        using RetType = AsyncValueT<AsyncFunc, Args...>;
 
         uint64_t id          = mNextId++;
         auto [iter, succeed] = mCoroutines.emplace(id, Entry());
@@ -215,9 +196,9 @@ public:
         // Create the Coro<T>
         newEntry.coro = newEntry.lambda();
 
-        auto& newCoro = newEntry.coro.template WithTmplArg<RetType>();
+        Async<RetType>& newCoro = newEntry.coro.WithTmplArg<RetType>();
         newCoro.SetId(id);
-        newCoro.SetScheduler(this);
+        newCoro.SetCoroManager(this);
 
         // Kick off the coroutine.
         newCoro.Resume();
@@ -225,29 +206,35 @@ public:
         return Handle<RetType>{id, this, mLiveSignal};
     }
 
-    void Update(UpdateEnum updateType = UpdateEnum::Update,
-                TimeEnum   timeType   = TimeEnum::Realtime)
+protected:
+    void ClearCoros()
     {
-        auto& timeQueue = GetUpdateQueue(updateType, timeType);
-        timeQueue.SetupUpdate(GetCurrentTime(timeType));
+        mCoroutines.clear();
+    }
 
-        while (timeQueue.CheckUpdate())
-        {
-            timeQueue.Pop()->Resume();
+    void StopNewFinishedCoro()
+    {
+        if (mNewFinishedCoro == 0)
+            return;
 
-            StopNewFinishedCoro();
-        }
+        const auto it    = mCoroutines.find(mNewFinishedCoro);
+        mNewFinishedCoro = 0;
+        Entry& e         = it->second;
+        assert(it != mCoroutines.end() && e.running);
+
+        e.running = false;
+        e.lambda  = {};
+
+        if (e.released)
+            mCoroutines.erase(it);
     }
 
 private:
-    using MyWait = WaitBP<UpdateEnum, TimeEnum>;
-
-    template <typename T, typename U, typename X>
-    friend class HandleBP;
     template <typename T>
-    friend class Async;
-    friend internal::PromiseBase;
-    friend MyWait;
+    friend class tokoro::Async;
+    template <typename T>
+    friend class tokoro::Handle;
+    friend class PromiseBase;
 
     void Release(uint64_t id)
     {
@@ -286,7 +273,7 @@ private:
     {
         // todo coro should be reset in this method. This method is once only.
         auto&     coro   = mCoroutines[id].coro;
-        Async<T>& asyncT = coro.template WithTmplArg<T>();
+        Async<T>& asyncT = coro.WithTmplArg<T>();
         return asyncT.GetHandle().promise().GetReturnValue();
     }
 
@@ -295,7 +282,7 @@ private:
     void GetReturn(uint64_t id)
     {
         auto&        coro   = mCoroutines[id].coro;
-        Async<void>& asyncT = coro.template WithTmplArg<void>();
+        Async<void>& asyncT = coro.WithTmplArg<void>();
         asyncT.GetHandle().promise().GetReturnValue();
     }
 
@@ -308,25 +295,65 @@ private:
 
         assert(id != 0 && "id parameter should never be invalid in this method.");
         assert(mNewFinishedCoro == 0 && "There's already a coro need to be finished. Only one coro at max should be finished in one awaiter resume.");
+
         mNewFinishedCoro = id;
     }
 
-    void StopNewFinishedCoro()
+    struct Entry
     {
-        if (mNewFinishedCoro == 0)
-            return;
+        TmplAny<Async>                  coro;
+        std::function<TmplAny<Async>()> lambda;
+        bool                            running  = true;
+        bool                            released = false;
+    };
 
-        const auto it    = mCoroutines.find(mNewFinishedCoro);
-        mNewFinishedCoro = 0;
-        Entry& e         = it->second;
-        assert(it != mCoroutines.end() && e.running);
+    uint64_t                            mNextId = 1;
+    std::unordered_map<uint64_t, Entry> mCoroutines;
+    uint64_t                            mNewFinishedCoro = 0;
+    std::shared_ptr<std::monostate>     mLiveSignal;
+};
 
-        e.running = false;
-        e.lambda  = {};
+} // namespace internal
 
-        if (e.released)
-            mCoroutines.erase(it);
+template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
+class SchedulerBP : public internal::CoroManager
+{
+public:
+    ~SchedulerBP()
+    {
+        // Clear coroutines first, so that the Wait objects can be safely removed from mExecuteQueues.
+        // If we do the other way around
+        CoroManager::ClearCoros();
+
+        for (auto& queue : mExecuteQueues)
+        {
+            queue.Clear();
+        }
     }
+
+    // SetCustomTimer: Set custom timer for specific time type to replace default realtime timer.
+    void SetCustomTimer(TimeEnum timeType, std::function<double()> getTimeFunc)
+    {
+        mCustomTimers[static_cast<int>(timeType)] = std::move(getTimeFunc);
+    }
+
+    void Update(UpdateEnum updateType = UpdateEnum::Update,
+                TimeEnum   timeType   = TimeEnum::Realtime)
+    {
+        auto& timeQueue = GetUpdateQueue(updateType, timeType);
+        timeQueue.SetupUpdate(GetCurrentTime(timeType));
+
+        while (timeQueue.CheckUpdate())
+        {
+            timeQueue.Pop()->Resume();
+
+            CoroManager::StopNewFinishedCoro();
+        }
+    }
+
+private:
+    using MyWait = WaitBP<UpdateEnum, TimeEnum>;
+    friend MyWait;
 
     int TypesToIndex(UpdateEnum updateType, TimeEnum timeType)
     {
@@ -386,73 +413,61 @@ private:
         timeQueue.Remove(waitHandle);
     }
 
-    struct Entry
-    {
-        internal::TmplAny<Async>                  coro;
-        std::function<internal::TmplAny<Async>()> lambda;
-        bool                                      running  = true;
-        bool                                      released = false;
-    };
-
     static constexpr int UpdateQueueCount = static_cast<int>(UpdateEnum::Count) * static_cast<int>(TimeEnum::Count);
 
-    uint64_t                                                               mNextId{1};
-    std::unordered_map<uint64_t, Entry>                                    mCoroutines;
-    uint64_t                                                               mNewFinishedCoro = 0;
     std::array<internal::TimeQueue<MyWait*>, UpdateQueueCount>             mExecuteQueues;
     std::array<std::function<double()>, static_cast<int>(TimeEnum::Count)> mCustomTimers;
-    std::shared_ptr<std::monostate>                                        mLiveSignal;
 };
 
 // Handle functions
 //
-template <typename T, typename UpdateEnum, typename TimeEnum>
-HandleBP<T, UpdateEnum, TimeEnum>::HandleBP(HandleBP&& other)
-    : mId(other.mId), mScheduler(other.mScheduler), mSchedulerLiveSignal(other.mSchedulerLiveSignal)
+template <typename T>
+Handle<T>::Handle(Handle&& other)
+    : mId(other.mId), mCoroMgr(other.mCoroMgr), mCoroMgrLiveSignal(other.mCoroMgrLiveSignal)
 {
-    other.mId        = 0;
-    other.mScheduler = nullptr;
-    other.mSchedulerLiveSignal.reset();
+    other.mId      = 0;
+    other.mCoroMgr = nullptr;
+    other.mCoroMgrLiveSignal.reset();
 }
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-HandleBP<T, UpdateEnum, TimeEnum>::~HandleBP()
+template <typename T>
+Handle<T>::~Handle()
 {
-    if (mId != 0 && !mSchedulerLiveSignal.expired())
+    if (mId != 0 && !mCoroMgrLiveSignal.expired())
     {
-        mScheduler->Release(mId);
+        mCoroMgr->Release(mId);
     }
 }
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-bool HandleBP<T, UpdateEnum, TimeEnum>::IsDown() const noexcept
+template <typename T>
+bool Handle<T>::IsDown() const noexcept
 {
-    return mSchedulerLiveSignal.expired() || mScheduler->IsDown(mId);
+    return mCoroMgrLiveSignal.expired() || mCoroMgr->IsDown(mId);
 }
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-void HandleBP<T, UpdateEnum, TimeEnum>::Stop() const noexcept
+template <typename T>
+void Handle<T>::Stop() const noexcept
 {
-    if (!mSchedulerLiveSignal.expired())
-        mScheduler->Stop(mId);
+    if (!mCoroMgrLiveSignal.expired())
+        mCoroMgr->Stop(mId);
 }
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-std::optional<T> HandleBP<T, UpdateEnum, TimeEnum>::TakeResult() const
+template <typename T>
+std::optional<T> Handle<T>::TakeResult() const
     requires(!std::is_void_v<T>)
 {
-    if (mSchedulerLiveSignal.expired())
+    if (mCoroMgrLiveSignal.expired())
         return std::nullopt;
-    return mScheduler->template GetReturn<T>(mId);
+    return mCoroMgr->template GetReturn<T>(mId);
 }
 
-template <typename T, typename UpdateEnum, typename TimeEnum>
-void HandleBP<T, UpdateEnum, TimeEnum>::TakeResult() const
+template <typename T>
+void Handle<T>::TakeResult() const
     requires(std::is_void_v<T>)
 {
-    if (mSchedulerLiveSignal.expired())
+    if (mCoroMgrLiveSignal.expired())
         return;
-    mScheduler->template GetReturn<T>(mId);
+    mCoroMgr->template GetReturn<T>(mId);
 }
 
 // TimeAwaiter functions
@@ -474,7 +489,11 @@ template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 WaitBP<UpdateEnum, TimeEnum>::~WaitBP()
 {
     if (mExeIter.has_value())
-        mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->RemoveWait(*mExeIter, mUpdateType, mTimeType);
+    {
+        auto coroMgrPtr   = mHandle.promise().GetCoroManager();
+        auto schedulerPtr = static_cast<SchedulerBP<UpdateEnum, TimeEnum>*>(coroMgrPtr);
+        schedulerPtr->RemoveWait(*mExeIter, mUpdateType, mTimeType);
+    }
 }
 
 template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
@@ -487,8 +506,10 @@ template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 template <typename T>
 void WaitBP<UpdateEnum, TimeEnum>::await_suspend(std::coroutine_handle<internal::Promise<T>> handle) noexcept
 {
-    mHandle  = std::coroutine_handle<internal::PromiseBase>::from_address(handle.address());
-    mExeIter = mHandle.promise().GetScheduler<UpdateEnum, TimeEnum>()->AddWait(this, mUpdateType, mTimeType);
+    mHandle           = std::coroutine_handle<internal::PromiseBase>::from_address(handle.address());
+    auto coroMgrPtr   = mHandle.promise().GetCoroManager();
+    auto schedulerPtr = static_cast<SchedulerBP<UpdateEnum, TimeEnum>*>(coroMgrPtr);
+    mExeIter          = schedulerPtr->AddWait(this, mUpdateType, mTimeType);
 }
 
 template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
@@ -537,7 +558,7 @@ public:
                     auto& coro    = std::get<Is>(mWaitedCoros);
                     auto  handle  = coro.GetHandle();
                     auto& promise = handle.promise();
-                    promise.SetScheduler(mParentHandle.promise().GetScheduler());
+                    promise.SetCoroManager(mParentHandle.promise().GetCoroManager());
                     promise.SetParentAwaiter(this);
                     handle.resume();
                 }(),
@@ -613,7 +634,7 @@ public:
                 auto& coro    = std::get<Is>(mWaitedCoros.value());
                 auto  handle  = coro.GetHandle();
                 auto& promise = handle.promise();
-                promise.SetScheduler(mParentHandle.promise().GetScheduler());
+                promise.SetCoroManager(mParentHandle.promise().GetCoroManager());
                 promise.SetParentAwaiter(this);
                 handle.resume();
             }(),
@@ -684,10 +705,8 @@ Async<void> WaitWhileBP(std::function<bool()>&& checkFunc)
 
 // Define preset types for quick setup.
 //
-using Scheduler = SchedulerBP<internal::PresetUpdateType, internal::PresetTimeType>;
-using Wait      = WaitBP<internal::PresetUpdateType, internal::PresetTimeType>;
-template <typename T>
-using Handle          = HandleBP<T, internal::PresetUpdateType, internal::PresetTimeType>;
+using Scheduler       = SchedulerBP<internal::PresetUpdateType, internal::PresetTimeType>;
+using Wait            = WaitBP<internal::PresetUpdateType, internal::PresetTimeType>;
 inline auto WaitUntil = WaitUntilBP<internal::PresetUpdateType, internal::PresetTimeType>;
 inline auto WaitWhile = WaitWhileBP<internal::PresetUpdateType, internal::PresetTimeType>;
 

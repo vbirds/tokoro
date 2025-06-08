@@ -9,12 +9,10 @@
 namespace tokoro
 {
 
-template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
-class SchedulerBP;
-
 namespace internal
 {
 
+class CoroManager;
 class CoroAwaiterBase;
 
 class PromiseBase
@@ -33,13 +31,8 @@ public:
 
     void SetId(uint64_t id);
 
-    // todo remove this, I need a Scheduler base
-    template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
-    void SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler);
-
-    // todo remove this, I need a Scheduler base
-    template <CountEnum UpdateEnum = PresetUpdateType, CountEnum TimeEnum = PresetTimeType>
-    SchedulerBP<UpdateEnum, TimeEnum>* GetScheduler() const;
+    void         SetCoroManager(CoroManager* scheduler);
+    CoroManager* GetCoroManager() const;
 
     void SetParentAwaiter(CoroAwaiterBase* awaiter);
 
@@ -48,7 +41,7 @@ protected:
     std::any           mReturnValue;
     uint64_t           mId            = 0;
     CoroAwaiterBase*   mParentAwaiter = nullptr;
-    void*              mScheduler     = nullptr;
+    void*              mCoroManager   = nullptr;
 };
 
 template <typename T>

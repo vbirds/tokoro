@@ -37,7 +37,7 @@ inline std::coroutine_handle<> PromiseBase::FinalAwaiter::await_suspend(std::cor
     }
     else
     {
-        promise.GetScheduler()->OnCoroutineFinished(coroId);
+        promise.GetCoroManager()->OnCoroutineFinished(coroId);
         return std::noop_coroutine();
     }
 }
@@ -64,16 +64,16 @@ inline void PromiseBase::SetId(uint64_t id)
     mId = id;
 }
 
-template <CountEnum UpdateEnum, CountEnum TimeEnum>
-void PromiseBase::SetScheduler(SchedulerBP<UpdateEnum, TimeEnum>* scheduler)
+class CoroManager;
+
+void PromiseBase::SetCoroManager(CoroManager* coroManager)
 {
-    mScheduler = static_cast<void*>(scheduler);
+    mCoroManager = static_cast<void*>(coroManager);
 }
 
-template <CountEnum UpdateEnum, CountEnum TimeEnum>
-SchedulerBP<UpdateEnum, TimeEnum>* PromiseBase::GetScheduler() const
+CoroManager* PromiseBase::GetCoroManager() const
 {
-    return static_cast<SchedulerBP<UpdateEnum, TimeEnum>*>(mScheduler);
+    return static_cast<CoroManager*>(mCoroManager);
 }
 
 inline void PromiseBase::SetParentAwaiter(CoroAwaiterBase* awaiter)

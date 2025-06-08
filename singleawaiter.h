@@ -27,7 +27,7 @@ public:
         mParentHandle = std::coroutine_handle<PromiseBase>::from_address(handle.address());
 
         auto& promise = mWaitedHandle.promise();
-        promise.SetScheduler(mParentHandle.promise().GetScheduler());
+        promise.SetCoroManager(mParentHandle.promise().GetCoroManager());
         promise.SetParentAwaiter(this);
 
         mWaitedHandle.resume(); // Kick off child Async<T>
