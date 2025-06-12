@@ -491,6 +491,11 @@ Handle<T>& Handle<T>::operator=(Handle&& other) noexcept
 {
     if (this != &other)
     {
+        if (mId != 0 && !mCoroMgrLiveSignal.expired())
+        {
+            mCoroMgr->Release(mId);
+        }
+
         mId                = other.mId;
         mCoroMgr           = other.mCoroMgr;
         mCoroMgrLiveSignal = std::move(other.mCoroMgrLiveSignal);

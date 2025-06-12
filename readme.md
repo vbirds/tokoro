@@ -1,4 +1,5 @@
 # tokoro
+## Overview
 
 **tokoro** is a lightweight, header-only coroutine library designed for modern C++20. Built for game, GUI apps, and any update-driven application. It provides efficient and powerful coroutine scheduling in a single thread—ideal for real-time environments.
 
@@ -115,7 +116,7 @@ Async<int> Sqaure(int value)
 **Coroutines can be nested** with co_await. So you can reuse some generic coroutines.
 `co_await awkwardHello("you", 1);`
 
-tokoro also have two helper coroutins: `WaitUntil` and `WaitWhile`. They are two contravers coroutines that will keep checking until input lambda turns true. They are very useful when you want wait for some external signals.
+tokoro also have two helper coroutins: `WaitUntil` and `WaitWhile`. They are two contravers coroutines that will keep checking  in every update until input lambda turns true. They are very useful when you want wait for some external signals.
 ```cpp
 co_await WaitUntil([&]()->bool{return launchComplete;});
 co_await WaitWhile([&]()->bool{return playingStartCutscene;});
@@ -125,24 +126,20 @@ In later sections, we will introduce **combination awaiters** `All`&`Any`, with 
 
 ### Launch a Coroutine
 
- `tokoro::Scheduler::Start()` is the only place to launch a **root coroutine**. Root coroutine is a concept we will use throughout this document, which means the coroutine directly started by Scheduler. The coroutines started in side root coroutines is called **nested coroutines**. 
+ `tokoro::Scheduler::Start()` is the only place to launch a **root coroutine**. Root coroutine is a concept we will use throughout this document, which means the coroutine directly started by Scheduler. The coroutines started inside root coroutines is called **sub-coroutines**.  Coroutines can only be exectuted in Scheduler as a root coroutine or under a root coroutine as a sub-coroutine.
 
 ```C++
 Handle<T> Scheduler::Start(CoroutineFunc, Args ...)
 ```
 
-`Scheduler::Start()` is a template function, which takes input a function (or functor) to create coroutine. The CoroutineFunc must returns Async<T>. The rest arguments is the CoroutineFunc's input parameters. The CoroutineFunc and arguments must be matched.
+`Scheduler::Start()` is a template function, which takes input a function (or functor) to create coroutine. The CoroutineFunc must returns Async\<T\>. The rest arguments is the CoroutineFunc's input parameters. The CoroutineFunc and arguments must be matched.
 
 `Start()` returns a `Handle<T>` that allows you to monitor, stop, or extract the coroutine result.
 
 ### Coroutine Lifetimes
-The Scheduler manages all root coroutine objects it starts. It keeps them alive until,
+The Scheduler manages all root coroutine objects it starts. It keeps them alive until coroutines stopped running ( by outside or insided ) **and** their handle has been destroid.
 
-1. Coroutines running to their end **and** their handle has been destroid.
-2. Coroutines running to their end **and** their result has been takend by Handle.TakeResult().
-3. Coroutines has been stopped from its handle.
-   
-Just like normal C++, when a root coroutine destroied, the nested coroutine objects as long as any other objects under the scope of the root coroutine will be destroied recursively. RAII is a recommend way to manage resources since a coroutine can be interrupted by outside manual stop or internal exceptions.
+Just like normal C++, when a root coroutine destroied, the sub-coroutine objects as long as any other objects under the scope of the root coroutine will be destroied recursively. RAII is a recommend way to manage resources since a coroutine can be interrupted by outside manual stop or internal exceptions.
 
 ### The Way to Handle It
 tokoro::Handle is a simple yet powerful tool to manage coroutines from outside. This section, we will go through each methods of it.
@@ -169,8 +166,8 @@ However, it's not a recommend practice to headlessly discard most handles. Make 
 #### void Handle::Stop()
 `Stop()` is the way to stop suspended coroutine from outside. This only function is the whole tokoro's cancelation system. tokoro do not take the current popular cancel token philosophy, relys on RAII and suspend point to safely stop coroutines. So you don't need to manage these annoying cancel tokens, and passing them down in your nested coroutines recursively. Stop mechanic removed a lot of pain of cancel token system, in most coroutines you don't need to do anything. ( Focus on single thread helps us to achieve this.) However for some coroutines, you still need to take care your resource releases and state rollback with RAII. We will talk in detail in the Best Practice section.
 
-#### std::optional<AsyncState> Handle::GetState()
-`GetState()` actually consist two layer of information. When it returns std::nullopt, it means either the handle is invalid or the associated scheduler is destroyed. To distinguish between this two state, you only need to get confirm from `IsInvilad()`. On the other hand, AsyncState tells you the state of the coroutine,
+#### std::optional\<AsyncState\> Handle::GetState()
+`GetState()` actually consist two layer of information. When it returns std::nullopt, it means either the handle is invalid or the associated scheduler is destroyed. To distinguish between these two state, you only need to get confirm from `IsInvilad()`. On the other hand, AsyncState tells you the state of the coroutine,
 
 * Running: every coroutine starts with Running state. But you shouldn't a assume every new started Handle will returns Running immediatly. Because the coroutine might already reached its end in the Scheduler::Start().
 * Succeed: means a coroutine finished execution without exceptions.
@@ -188,7 +185,7 @@ if (state.has_value() && *state == AsyncState::Running)
 ```
 is just too annoying. So `IsRunning()` is the short-term of above. 
 
-#### std::optional<T> Handle::TakeResult()
+#### std::optional\<T\> Handle::TakeResult()
 `TakeResult()` is a one time call. As the name says, it will take out the return of the coroutine return it to caller. So if your coroutine do produced a return, the first call will give you the result, the second call will returns std::nullopt.
 However, when the coroutine is still running, TakeResult will also returns nullopt. To tell whether it's already taken, you can call `IsRunning()` to make sure.
 If a coroutine is ended with a unhandled exception, TakeResult() will throw it out. The throw is one time too.
@@ -220,14 +217,16 @@ if(timeout.has_value())
     LOG_Error("Timeout after 10 second when try to load %s", meshPath);
 }
 ```
-Note that, **when any of the coroutine returned, all the other coroutines are immdediatly stopped** by this awaiter.
+Note that, **when any of the coroutine returned, all the other sub-coroutines are immdediatly stopped** by this awaiter.
 If you do need other coroutines to keep running after Any awaiter, you have to start them as root coroutines, and wait for their handle instead.
+
 ```cpp
 Handle<Mesh> handle1 = GlobalScheduler().Start(LoadMesh, mesh1);
 Handle<Mesh> handle2 = GlobalScheduler().Start(LoadMesh, mesh2);
 // You can probably co_await WaitWhile([&](){return handle1.IsRunning() || handle2.IsRunning()});
 // But this is just a example.
 auto [handle1Finished, handle2Finished] = co_await All(WaitWhile([&](){return handle1.IsRunning()}), WaitWhile([&](){return handle2.IsRunning()}));
+
 if(handle1Finished.has_value())
 {
     LOG("%s loaded first", mesh1);
@@ -238,6 +237,136 @@ else
 }
 ```
 
+### Custom Updates
+tokoro gives user the default Scheduler for them to start using coroutines in application who only have one regular update event. However most current day's game engine have more than that, like in Unity there's Update, LateUpdate, FixedUpdate. Also there are realtime and game time two different timer in Unity (The later one can be paused) , we want to support all that too. 
+Adding all of these events and timers of all engines to tokoro will confuse users who does not need them. So tokoro has a way to let user custom their own update. Here is a example, there's some constrains that is not verifable by compilers, please read the comments carefully.
+```cpp
+enum class UpdateType
+{
+    Update = 0, // Update type start with 0 value, the zero enum will be taken as default.
+    PreUpdate,
+    PostUpdate,
+    Count, // Count at last of enum is a must have for tokoro.
+};
 
+enum class TimeType
+{
+    EmuRealTime = 0, // Time type should start with 0 value too, the zero enum will be taken as default.
+    GameTime,
+    Count, // Count at last of enum is a must have for tokoro.
+};
 
+// Give alias names for ease of life. Prefix BP is for Blueprint.
+//
+// Note: You can still use Scheduler, Wait if you really like these names.
+// Just don't introduce 'using namespace tokoro' to your code.
+using MyScheduler = SchedulerBP<UpdateType, TimeType>;
+using MyWait      = WaitBP<UpdateType, TimeType>;
+
+// There's no way to give alias to functions in C++, so we have to use function ptr for WaitUntil & WaitWhile.
+// Also because of that, WaitUntilBP and WaitWhileBP does not support to resume at a user wanted CustomUpdate.
+// But it's very easy to implement one if you look into WaitUntilBP's implement, it's literally 2 lines of code.
+inline auto MyWaitUntil = WaitUntilBP<UpdateType, TimeType>;
+inline auto MyWaitWhile = WaitWhileBP<UpdateType, TimeType>;
+
+MyScheduler sched;
+double emuRealTime = 0;
+double gameTime = 0;
+bool gamePaused = false;
+
+int main()
+{
+    ... 
+        
+    // SetCustomTimer accept a get function of the time: double getTime()
+    // Note: this timer is only for test,
+    // in most applications the default timer is good enough for 'real time'
+    sched.SetCustomTimer(TimeType::EmuRealTime, [&]() -> double { return emuRealTime; });
+    sched.SetCustomTimer(TimeType::GameTime, [&]() -> double { return gameTime; });    
+    
+    // Simulate a game engine loop
+    while(true)
+    {
+        emuRealTime += frameTime;
+        if (!gamePaused)
+            gameTime += frameTime;
+
+        ...
+
+        // It's your responsibility to setup all Update calls in the engine. The compiler have no way to detect if all Update types are called.
+        // If you have some update in other threads, you have to setup the sync point with your 'main' gameplay threads with mutex, to call
+        // these Updates. Just like how Unity do with their FixedUpdate. Scheduler is NOT thread safe.
+        sched.Update(UpdateType::PreUpdate, TimeType::EmuRealTime);
+        sched.Update(UpdateType::PreUpdate, TimeType::GameTime);
+
+        sched.Update(UpdateType::Update, TimeType::EmuRealTime);
+        sched.Update(UpdateType::Update, TimeType::GameTime);
+
+        sched.Update(UpdateType::PostUpdate, TimeType::EmuRealTime);
+        sched.Update(UpdateType::PostUpdate, TimeType::GameTime);
+
+        ...
+    }
+}
+
+// Some where in your game, you can have coroutines like this,
+ Handle handle = sched.Start([&]() -> Async<void> {
+     co_await MyWait(UpdateType::PreUpdate); // Wait next PreUpdate
+     co_await MyWait(UpdateType::Update); // Wait next Update
+     co_await MyWait(UpdateType::PostUpdate); // Wait next PostUpdate
+     co_await MyWait(1, UpdateType::Update, TimeType::GameTime); // Wait for 1 sec in GameTime, and resume in Update.
+     co_await MyWait(1); // Use default parameters of update and time, equals to MyWait(1, UpdateType::Update, TimeType::EmuRealTime)
+ });
+```
+
+### Execution Flow
+It may looks obvious, but I feel it's nesessary to clarify when will a coroutine returns it's execution control and game loop can continue process. 
+Coroutines start executing immediatly when they created by `Scheduler.Start` or parent coroutine. They only suspend and return control to main thread when `co_await Wait(...)`. Look at the code below,
+```cpp
+scheduler.Start([]()->Async<void>{
+	std::cout<< "Current Frame: " << Time.Frame() << std::endl;
+
+    co_await []()->Async<void>{
+    	std::cout<< "Current Frame: " << Time.Frame() << std::endl;
+        co_await Wait(); // Suspend for next update.
+        std::cout<< "Current Frame: " << Time.Frame() << std::endl;
+    }
+    
+	std::cout<< "Current Frame: " << Time.Frame() << std::endl;
+});
+```
+Assume the scheduler.Start is called in frame 10, the console would show:
+```bash
+Current Frame: 10
+Current Frame: 10
+Current Frame: 11
+Current Frame: 11
+```
+
+### Exceptions
+tokoro have complete exception support ( I personally don't get why people want to use exception in C++ games, but implement it anyway 😆 ). When a exception thrown, it will be pass upward all the way to the root coroutine if no proper try catched it. In that throw up process all objects will be destroyed just like exceptions in a normal function call, so it's important to use RAII to clear things up. If no one catch the exception inside the coroutine, the root coroutine will be end with AsyncState::Failed. No result will be return from it. 
+Howevery, if you call `Handle::TakeResult()` of that failed coroutine, the saved exception will be rethrown for once. So that the program can catch and process this exception outside of coroutine.
+Not specific to tokoro, but I need to metion that, exceptions will crash the application if you compile your C++ code with no-exception options.
+
+## Performance?
+
+## Best Practices
+#### Always make sure your coroutine's dependency live longer than your coroutines.
+
+#### Single thread means no concurrent issues, but you still need to take care the shared status.
+
+#### Be alert with coroutines that can run multiple instances at same time.
+
+## FAQ
+#### What's the point for single threaded coroutings?
+
+#### How to debug?
+
+## Roadmap
+
+## Inspiring
+
+## Platform Compatibility
+
+## License
 
