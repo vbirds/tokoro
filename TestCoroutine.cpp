@@ -739,6 +739,41 @@ void TestHandle()
     std::cout << "TestHandle passed\n";
 }
 
+// Member function test
+void TestMemberCoroutines()
+{
+    class Test
+    {
+    public:
+        void StartCount()
+        {
+            GlobalScheduler().Start(&Test::CountCoro, this, 3, 2).Forget();
+        }
+        int value = 0;
+
+    private:
+        Async<void> CountCoro(int countTimes, int step)
+        {
+            for (int i = 0; i < countTimes; ++i)
+            {
+                co_await Wait();
+                value += step;
+            }
+        }
+    };
+
+    Test test;
+    test.StartCount();
+
+    for (int i = 0; i < 10; ++i)
+    {
+        GlobalScheduler().Update();
+    }
+
+    assert(test.value == 6);
+    std::cout << "TestMemberCoroutines passed\n";
+}
+
 // Stress test: spawn many coroutines computing Fibonacci and cancel some
 void TestStress(size_t count, int fibN)
 {
@@ -802,6 +837,7 @@ int main()
     TestWaitUntilAndWhile();
     TestThrowException();
     TestHandle();
+    TestMemberCoroutines();
 
     TestStress(10000, 10);
 
