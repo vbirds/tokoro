@@ -75,13 +75,20 @@ public:
     Handle(Handle&& other) noexcept;
     Handle& operator=(Handle&& other) noexcept;
     Handle(const Handle& other) = delete; // Handle is not copiable.
+
+    // Destructor will stop the associated coroutine.
     ~Handle() noexcept;
 
     // True if handle is not create by Scheduler.
     bool IsValid() const noexcept;
 
-    // Stop a coroutine when they are running. Or the method will do nothing.
+    // Manually stop a coroutine when they are running. Or the method will do nothing.
     void Stop() const noexcept;
+
+    // Normally Handles with destroy associated coroutines when they go out of scope.
+    // Forget makes them won't. However, everything else in Handle still works after forget.
+    // Forget is good for Fire and Forget situation.
+    void Forget() noexcept;
 
     // Return nothing if the Scheduler is no longer exist.
     std::optional<AsyncState> GetState() const noexcept;
@@ -109,8 +116,11 @@ private:
     {
     }
 
-    uint64_t                      mId      = 0;
-    internal::CoroManager*        mCoroMgr = nullptr;
+    void Reset();
+
+    uint64_t                      mId            = 0;
+    bool                          mBoundLifetime = true;
+    internal::CoroManager*        mCoroMgr       = nullptr;
     std::weak_ptr<std::monostate> mCoroMgrLiveSignal;
 };
 
@@ -206,9 +216,13 @@ public:
     /// Start: start a coroutine and return its handle.
     /// func: Callable object that returns Async<T>. Could be a lambda or function.
     /// funcArgs: parameters of AsyncFunc£¬Start will forward them to construct the coroutine.
+    /// Return value: The Handle of new started coroutine. When handle destroyed they will automatically
+    ///               Stop() the coroutine, so you should never discard the return. You can use Forget()
+    ///               to do fire and forget style:
+    ///               sched.Start(Something).Forget();
     template <typename AsyncFunc, typename... Args>
         requires internal::ReturnsAsync<AsyncFunc, Args...> // Constrain that need function to return Async<T>
-    Handle<AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
+    [[nodiscard]] Handle<AsyncValueT<AsyncFunc, Args...>> Start(AsyncFunc&& func, Args&&... funcArgs)
     {
         using RetType = AsyncValueT<AsyncFunc, Args...>;
 
@@ -480,7 +494,10 @@ private:
 //
 template <typename T>
 Handle<T>::Handle(Handle&& other) noexcept
-    : mId(other.mId), mCoroMgr(other.mCoroMgr), mCoroMgrLiveSignal(std::move(other.mCoroMgrLiveSignal))
+    : mId(other.mId),
+      mBoundLifetime(other.mBoundLifetime),
+      mCoroMgr(other.mCoroMgr),
+      mCoroMgrLiveSignal(std::move(other.mCoroMgrLiveSignal))
 {
     other.mId      = 0;
     other.mCoroMgr = nullptr;
@@ -491,12 +508,10 @@ Handle<T>& Handle<T>::operator=(Handle&& other) noexcept
 {
     if (this != &other)
     {
-        if (mId != 0 && !mCoroMgrLiveSignal.expired())
-        {
-            mCoroMgr->Release(mId);
-        }
+        Reset();
 
         mId                = other.mId;
+        mBoundLifetime     = other.mBoundLifetime;
         mCoroMgr           = other.mCoroMgr;
         mCoroMgrLiveSignal = std::move(other.mCoroMgrLiveSignal);
 
@@ -509,10 +524,7 @@ Handle<T>& Handle<T>::operator=(Handle&& other) noexcept
 template <typename T>
 Handle<T>::~Handle() noexcept
 {
-    if (mId != 0 && !mCoroMgrLiveSignal.expired())
-    {
-        mCoroMgr->Release(mId);
-    }
+    Reset();
 }
 
 template <typename T>
@@ -529,6 +541,12 @@ void Handle<T>::Stop() const noexcept
 
     if (!mCoroMgrLiveSignal.expired())
         mCoroMgr->Stop(mId);
+}
+
+template <typename T>
+void Handle<T>::Forget() noexcept
+{
+    mBoundLifetime = false;
 }
 
 template <typename T>
@@ -584,6 +602,22 @@ void Handle<T>::TakeResult() const
         return;
 
     mCoroMgr->TakeResult<T>(mId);
+}
+
+template <typename T>
+void Handle<T>::Reset()
+{
+    if (mId != 0 && !mCoroMgrLiveSignal.expired())
+    {
+        if (mBoundLifetime)
+            mCoroMgr->Stop(mId);
+        mCoroMgr->Release(mId);
+
+        mId      = 0;
+        mCoroMgr = nullptr;
+        mCoroMgrLiveSignal.reset();
+        mBoundLifetime = true;
+    }
 }
 
 // TimeAwaiter functions

@@ -225,28 +225,30 @@ void TestStartInCoroutine()
     int       frame = 0;
 
     sched.Start([&]() -> Async<void> {
-        co_await Wait();
+             co_await Wait();
 
-        auto innerCoro = [&]() -> Async<void> {
-            co_await Wait();
-            // Inner coroutine should always resume in next frame
-            assert(frame == 1);
-        };
+             auto innerCoro = [&]() -> Async<void> {
+                 co_await Wait();
+                 // Inner coroutine should always resume in next frame
+                 assert(frame == 1);
+             };
 
-        // Star more than 2 to make sure some inner coros insert after outer coros
-        sched.Start(innerCoro);
-        sched.Start(innerCoro);
-        sched.Start(innerCoro);
-        sched.Start(innerCoro);
+             // Star more than 2 to make sure some inner coros insert after outer coros
+             sched.Start(innerCoro).Forget();
+             sched.Start(innerCoro).Forget();
+             sched.Start(innerCoro).Forget();
+             sched.Start(innerCoro).Forget();
 
-        assert(frame == 0);
-    });
+             assert(frame == 0);
+         })
+        .Forget();
 
     // One more outer coro to make sure the first update won't exceed immediately.
     sched.Start([&]() -> Async<void> {
-        co_await Wait();
-        assert(frame == 0);
-    });
+             co_await Wait();
+             assert(frame == 0);
+         })
+        .Forget();
 
     for (; frame < 5; ++frame)
     {
@@ -369,10 +371,11 @@ void TestCustomUpdateAndTimers()
 
         // Start another coro to stop and start the game time.
         sched.Start([&]() -> Async<void> {
-            gamePaused = true;
-            co_await MyWait(2);
-            gamePaused = false;
-        });
+                 gamePaused = true;
+                 co_await MyWait(2);
+                 gamePaused = false;
+             })
+            .Forget();
 
         const double saveGameTime = gameTime;
         co_await MyWait(0, UpdateType::Update, TimeType::GameTime); // Wait one game frame
@@ -399,7 +402,7 @@ void TestCustomUpdateAndTimers()
     // Game Loop
     //
     constexpr double frameTime = 0.166666;
-    for (int i = 0; i < 100 && handle.GetState().value() != AsyncState::Succeed; ++i)
+    for (int i = 0; i < 100 && handle.IsRunning(); ++i)
     {
         emuRealTime += frameTime;
         if (!gamePaused)
@@ -429,12 +432,13 @@ void TestWaitUntilAndWhile()
     int       frame = 0;
 
     sched.Start([&]() -> Async<void> {
-        co_await WaitUntil([&]() { return frame == 10; });
-        assert(frame == 10);
+             co_await WaitUntil([&]() { return frame == 10; });
+             assert(frame == 10);
 
-        co_await WaitWhile([&]() { return frame < 20; });
-        assert(frame == 20);
-    });
+             co_await WaitWhile([&]() { return frame < 20; });
+             assert(frame == 20);
+         })
+        .Forget();
 
     for (; frame < 100; ++frame)
     {
@@ -680,6 +684,31 @@ void TestHandle()
             assert(false && "This line should never execute."); // LCOV_EXCL_LINE
         } // LCOV_EXCL_LINE
 
+        // Forget and not forget test
+        int forgetResult    = 0;
+        int notForgetResult = 0;
+        {
+            auto forgetHandle1 = sched.Start([&]() -> Async<void> {
+                co_await Wait();
+                forgetResult++;
+            });
+
+            forgetHandle1.Forget();
+
+            // Do some move to make sure forget works with move.
+            auto forgetHandle2(std::move(forgetHandle1));
+            forgetHandle1 = std::move(forgetHandle2);
+
+            auto notForgetHandle1 = sched.Start([&]() -> Async<void> {
+                co_await Wait();
+                notForgetResult++;
+            });
+
+            // Do some move to make sure forget works with move.
+            auto notForgetHandle2(std::move(notForgetHandle1));
+            notForgetHandle1 = std::move(notForgetHandle2);
+        }
+
         for (int i = 0; i < 10; ++i)
         {
             sched.Update();
@@ -697,6 +726,9 @@ void TestHandle()
         neverEndHandle.TakeResult(); // Nothing will happen
 
         assert(moveHandle.GetState().value() == AsyncState::Succeed);
+
+        assert(forgetResult != 0);
+        assert(notForgetResult == 0);
     }
 
     assert(!moveHandle.IsRunning());
