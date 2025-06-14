@@ -41,7 +41,7 @@ Async<void> awkwardHello(std::string somebody, double holdSeconds)
 
 int main()
 {    
-    schedular.Start(awkwardHello, "tokoro", 1);
+    schedular.Start(awkwardHello, "tokoro", 1).Forget();
     
     // Simulate a game update loop
     while(true)
@@ -134,12 +134,46 @@ Handle<T> Scheduler::Start(CoroutineFunc, Args ...)
 
 `Scheduler::Start()` is a template function, which takes input a function (or functor) to create coroutine. The CoroutineFunc must returns Async\<T\>. The rest arguments is the CoroutineFunc's input parameters. The CoroutineFunc and arguments must be matched.
 
-`Start()` returns a `Handle<T>` that allows you to monitor, stop, or extract the coroutine result.
+`Start()` returns a `Handle<T>` that allows you to monitor, stop, or extract the coroutine result. **When the Handle returned goes out of it's scope, it will stop the associated coroutine automatically**. So you should never discard the return value of `Scheduler.Start()`, that will stops the coroutine immediatly. If you just want **fire and forget** the coroutine you can do it with `Handle::Forget()`,
+```cpp
+Scheduler::Start(Fire).Forget();
+```
+
+**Launch coroutine from a member function** could be a bit confusing for some user, here is a example,
+```cpp
+    class Soldier
+    {
+    public:
+        void StartPatrol(int routeId, int count)
+        {
+            patroTask = GlobalScheduler().Start(&Soldier::Patrol /*Notice & and Soldier:: scope is must*/, 
+                                                this /*Pass this ptr excipitly in first arg*/, 
+                                                routeId, /*Rest args are normal method inputs*/
+                                                count);
+            // Note: Assign with right-value of new handle will cause last coroutine automatically stops.
+            // Which is exactly what we want here.
+        }
+
+    private:
+        Async<void> Patrol(int routeId, int count)
+        {
+            ...
+        }
+
+        Handle<void> patroTask;
+    };
+```
 
 ### Coroutine Lifetimes
-The Scheduler manages all root coroutine objects it starts. It keeps them alive until coroutines stopped running ( by outside or insided ) **and** their handle has been destroid.
+The Scheduler manages all root coroutine objects it starts. It keeps them alive until coroutines stopped running. There are three ways for a coroutine to stop.
 
-Just like normal C++, when a root coroutine destroied, the sub-coroutine objects as long as any other objects under the scope of the root coroutine will be destroied recursively. RAII is a recommend way to manage resources since a coroutine can be interrupted by outside manual stop or internal exceptions.
+1. Coroutines returns normally.
+2. An exception throw out from a coroutine, and there's no proper catch for it.
+3. The associated handle stops the coroutine.
+    1. Usually, when the handle go out of its scope, it stops and release the coroutine with RAII.
+    2. User can always call `Handle.Stop()` manually to stop the coroutine at anytime.
+
+Just like normal C++, when a root coroutine destroied, the sub-coroutine objects as long as any other objects under the scope of the root coroutine will be destroied recursively. RAII is a recommend way to manage resources since a coroutine can be interrupted anytime by outside manual stop or internal exceptions.
 
 ### The Way to Handle It
 tokoro::Handle is a simple yet powerful tool to manage coroutines from outside. This section, we will go through each methods of it.
@@ -189,6 +223,10 @@ is just too annoying. So `IsRunning()` is the short-term of above.
 `TakeResult()` is a one time call. As the name says, it will take out the return of the coroutine return it to caller. So if your coroutine do produced a return, the first call will give you the result, the second call will returns std::nullopt.
 However, when the coroutine is still running, TakeResult will also returns nullopt. To tell whether it's already taken, you can call `IsRunning()` to make sure.
 If a coroutine is ended with a unhandled exception, TakeResult() will throw it out. The throw is one time too.
+
+#### Handle::Forget()
+As state in previous, `Forget()` usually used when you do **Fire and Forget** coroutines. However, you can still keep using the handle after `Forget()`. **All the other functions will still work as expected after you forget**.
+`Forget()` is usually risky if your coroutine has dependencies to outside of the coroutine, they usually do in game applications. So thing twice when you want a Fire and Forget.
 
 ### Waiters
 Currently there are only 3 kind of awaiters you can explicitly used in tokoro (there are some implicity awaiters, but you don't need to care as a library user.)
@@ -348,7 +386,7 @@ tokoro have complete exception support ( I personally don't get why people want 
 Howevery, if you call `Handle::TakeResult()` of that failed coroutine, the saved exception will be rethrown for once. So that the program can catch and process this exception outside of coroutine.
 Not specific to tokoro, but I need to metion that, exceptions will crash the application if you compile your C++ code with no-exception options.
 
-## Performance?
+## Performance
 
 ## Best Practices
 #### Always make sure your coroutine's dependency live longer than your coroutines.
