@@ -546,9 +546,6 @@ std::optional<AsyncState> Handle<T>::GetState() const noexcept
 template <typename T>
 bool Handle<T>::IsRunning() const noexcept
 {
-    if (!IsValid())
-        return false;
-
     const auto stateHolder = GetState();
     if (!stateHolder.has_value())
         return false;
