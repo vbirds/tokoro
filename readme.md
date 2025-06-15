@@ -354,7 +354,7 @@ int main()
      co_await MyWait(UpdateType::PostUpdate); // Wait next PostUpdate
      co_await MyWait(1, UpdateType::Update, TimeType::GameTime); // Wait for 1 sec in GameTime, and resume in Update.
      co_await MyWait(1); // Use default parameters of update and time, equals to MyWait(1, UpdateType::Update, TimeType::EmuRealTime)
- });
+ }).Forget();
 ```
 
 ### Execution Flow
@@ -371,7 +371,7 @@ scheduler.Start([]()->Async<void>{
     }
     
 	std::cout<< "Current Frame: " << Time.Frame() << std::endl;
-});
+}).Forget();
 ```
 Assume the scheduler.Start is called in frame 10, the console would show:
 ```bash
