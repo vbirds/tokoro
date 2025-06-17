@@ -389,23 +389,63 @@ Not specific to tokoro, but I need to metion that, exceptions will crash the app
 ## Performance
 Performance cost for scheduling is one of most significant measurement for coroutine system in game applications. tokoro makes sure the cpu cost for scheduling one resume is O(logN). The Fibonacci coroutines stress test in TestCoroutine.cpp is designed to test the scheduling performance of tokoro. It shows that for 10000 running coroutines who randomly resumed in 1 sec each time, the max update stop is only 0.35ms, 2.1% of a 60 fps refresh time. More than enough for heavy coroutine usage in games.
 
-## Best Practices
-#### Always make sure your coroutine's dependency live longer than your coroutines.
-
-#### Single thread means no concurrent issues, but you still need to take care the shared status.
-
-#### Be alert with coroutines that can run multiple instances at same time.
-
 ## FAQ
 #### What's the point for single threaded coroutings?
+Coroutine feature normally used for utilize multi-thread cpus, however because coroutine is a automatically localized state machine, it is very good to implement gameplay logics, which are always break by frames. By focusing on single thread frame scheduling, users can get ride of concurrent data racing issues, focusing on gameplay. Makes the code easy to understand and high cohesion.
 
 #### How to debug?
+Debuging in C++ coroutines are much more hard compare to normal functions, because of two issues,
+
+1. No local variables to watch like normal functions.
+2. No stack tracing to look for call up chain like normal functions.
+The 1st one might get be better if popular debugers gets better on read coroutine state variables, but for now, in most debuger, you have look into these compiler generated structures for yourself.
+The 2nd issue are more complicated, there's besically no way in coroutines to show a 'call stack' for the call up chain. Because coroutine's callstack are just different, it takes time to get use to it, all the languages have coroutines have same issue. Maybe we can have some macro tools to save the calling chain, but I haven't found a alegent way to do that.
+
+## Best Practices
+Coroutines can be so easy and nice, that beginners tends to abuse it in the project. There's some tips from me you can checkout.
+
+#### Always make sure your coroutine's dependency live longer than your coroutines.
+The dependency here means the references or pointers the coroutine is using. Whenever a coroutine have ref or pointer pointing to outside of the coroutine memory, you have to look carefully will your coroutine live longer than them. Once it happens, it will lead to invalid memory access. This issue can easily get overlooked for beginners, because the delay execution nature of coroutines. You can take advantage of Handle's RAII mechanic, to make sure once the dependencies are freed, the coroutine is freed too.
+
+#### Single thread means no concurrent issues, but you still need to take care the shared status.
+As the previous one states, the ref and pointers to outside a coroutine can lead to issues. In tokoro, because most of thing are running in single thread, user don't need to think about mutex and atomic. But if other part of your program is also changing same memory your coroutine are using, it can easily lead to data curruption. For example,
+```cpp
+Async<Entity> FindEnemy()
+{
+    for(auto& entity : currentVisibleEntities)
+    {
+        if(IsEnemy(entity))
+            co_return entity;
+        
+        co_await Wait(); // Yield for one frame for smooth frame cost.
+    }
+
+    co_return None;
+}
+```
+In the code above, it's intend to check one entity in one frame, so that the cost can be ease across frames. However, currentVisibleEntities is a container keep changing by this entity's other components, so the iterator the for loop is using can become corrupted. There's no golden rules to deal with these data issues, you have to design a way suit for your own situation. For this special case, it can change to use the current checking index as a iter, and check whether it still valid every frame. 
+You can still use other threading tools in tokoro, you just need to launch them in coroutine and use WaitUntil/WaitWhile to check if it finished every frame.
+
+#### Be alert with coroutines that can run multiple instances at same time.
+In previous tip, we said have shared and changing data accessing can be dangerous. If a coroutine read from same data, but can launch to has mutiple instance running at same time, it can easily have shared changing data. If there's only two instances of same coroutine, maybe it's still fine to manage the shared data between them. But good luck if you got more than that. One simple rule is, if your coroutine is changing shared data, don't launching mutiple of them. You can save a Handle of it to tell is it save to launch second one, or you can always use the later one to replace to older one, it's up to you. On the other hand, if the coroutine don't have shared data rw, or only read from them, there's no problem to have muti instances at same time. Note, you still need to take care of the issue in previous tip.
+
+#### Coroutines are infectious
+To use a `Async<T> func()`, you either use Scheduler.Start() to launch and wait for it with Handle or you just `co_await` it in another `Async\<T\>` fucntion. Sometimes it seems easier to make your function become Async\<T\>, so you don't have to mess up with Scheduler or Handle, let your method's use to worry about it. If people keep thinking in this way, you will find that slowly, all of your 'normal' functions will return Async\<T\>. Is it good? No. If you read all the previous tips in this section, you will come to a idea that coroutine is not a silver bullet for everything. If everything become `Async\<T\>`, it will be no way for you to track when a coroutine will return, what shared data does it use, can it be use with mutiple instances, your project will become a mess. So the project should have very restricted rules on what things can be `Async\<T\>`. If a method could be 'normal' it has to be 'normal'. If the logic you are implmenting need use coroutine, it's better to keep the `Async\<T\>` method private to you, and let other use the normal APIs you expose to them.
 
 ## Roadmap
+Currently, tokoro can be considered feature complete. Howevery there's some direction I want to investigate. So these things are not gunreeteed to be in the library, but I gland to if we find out a nice way to add them.
+
+* Optimize the allocation performance when insert to TimeQueue of scheduler: Currently it utilized std::mutiset. This container suits our purpose very well, however, it need to do dynamic allocation for every insert. I want to find a way to optimize it futher more.
+* Implement Callback Awaiter. Callback Awaiter is a awaiter for user to wait for external signels. Game engine or frameworks can make use of it as a base to implement their own awiaters. For example AnimationAwaiters can let user `co_await Entity.Play("Die")`. Currently you can use WaitUntil/WaitWhile to achieve similiar functionlity. Howevery, they need get resumed every frame to check if the flag turns. A Callback Awaiter can let user tell the coroutine to resume in next update without constantly checking.
+* ThreadPool Awaiter. tokoro focusing on single thread coroutines, but that doesn't mean we refuse to have some convinient thread pool tool to dispatch heavy cpu tasks. However, find out a way to do it without effecting single thread performance can be a chanllenge.
+* Utilities to help track the callup chain of nested coroutines for debug.
 
 ## Inspiring
+tokoro is inspired by Unity's coroutine system and it's superum successor UniTask.
 
 ## Platform Compatibility
+tokoro should work on any platform support C++ 20 coroutines. Test runs on linxu/mac/windows. Other platforms need more feed back from community.
 
 ## License
+tokoro use MIT license.
 
