@@ -94,7 +94,7 @@ void Engine::Update()
     GlobalScheduler().Update();
 }
 ```
-### Writing a Coroutine
+### Create a Coroutine
 
 A tokoro coroutine contains at leat 2 elements:
 
@@ -387,6 +387,7 @@ Howevery, if you call `Handle::TakeResult()` of that failed coroutine, the saved
 Not specific to tokoro, but I need to metion that, exceptions will crash the application if you compile your C++ code with no-exception options.
 
 ## Performance
+Performance cost for scheduling is one of most significant measurement for coroutine system in game applications. tokoro makes sure the cpu cost for scheduling one resume is O(logN). The Fibonacci coroutines stress test in TestCoroutine.cpp is designed to test the scheduling performance of tokoro. It shows that for 10000 running coroutines who randomly resumed in 1 sec each time, the max update stop is only 0.35ms, 2.1% of a 60 fps refresh time. More than enough for heavy coroutine usage in games.
 
 ## Best Practices
 #### Always make sure your coroutine's dependency live longer than your coroutines.

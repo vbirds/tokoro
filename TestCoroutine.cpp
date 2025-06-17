@@ -119,21 +119,6 @@ void TestAnyCombinator()
     std::cout << "TestAnyCombinator passed\n";
 }
 
-// Recursive Fibonacci coroutine
-Async<int> Fib(int n)
-{
-    if (n < 2)
-        co_return n;
-
-    co_await Wait();
-
-    auto a  = Fib(n - 1);
-    auto b  = Fib(n - 2);
-    int  ra = co_await a;
-    int  rb = co_await b;
-    co_return ra + rb;
-}
-
 // Test NextFrame ordering
 void TestNextFrame()
 {
@@ -774,51 +759,147 @@ void TestMemberCoroutines()
     std::cout << "TestMemberCoroutines passed\n";
 }
 
-// Stress test: spawn many coroutines computing Fibonacci and cancel some
-void TestStress(size_t count, int fibN)
+class Rand
 {
-    Scheduler                sched;
+public:
+    static void SetSeed(uint32_t seed)
+    {
+        mState = seed;
+    }
+
+    static uint32_t Int(uint32_t min, uint32_t max)
+    {
+        return Next() % (max - min) + min;
+    }
+
+    static float Float(float min, float max)
+    {
+        constexpr float invUInt32MaxPlus1 = 1.0f / 4294967296.0f;
+        float           normalized        = Next() * invUInt32MaxPlus1;
+        return min + normalized * (max - min);
+    }
+
+private:
+    static uint32_t Next()
+    {
+        mState = mState * 1664525u + 1013904223u;
+        return mState;
+    }
+
+    static uint32_t mState;
+};
+
+Async<uint32_t> FibCoro(uint32_t n)
+{
+    if (n < 2)
+        co_return n;
+
+    co_await Wait(Rand::Float(0.0f, 1.0f));
+
+    auto a  = FibCoro(n - 1);
+    auto b  = FibCoro(n - 2);
+    int  ra = co_await a;
+    int  rb = co_await b;
+    co_return ra + rb;
+}
+
+int Fibonacci(int n)
+{
+    if (n <= 1)
+        return n;
+
+    int a = 0, b = 1;
+    for (int i = 2; i <= n; ++i)
+    {
+        int temp = a + b;
+        a        = b;
+        b        = temp;
+    }
+    return b;
+}
+
+uint32_t Rand::mState = 0;
+
+// Stress test: spawn many coroutines computing Fibonacci and cancel some
+void StressTest(size_t count)
+{
+    double simTime = 0.0f;
+
+    Scheduler sched;
+    sched.SetCustomTimer(internal::PresetTimeType::Realtime, [&]() { return simTime; });
+
     std::vector<Handle<int>> handles;
     handles.reserve(count);
+
+    uint32_t finished = 0;
 
     // Start coroutines
     for (size_t i = 0; i < count; ++i)
     {
-        auto h = sched.Start([fibN]() -> Async<int> {
-            co_return co_await Fib(fibN);
-        });
+        Rand::SetSeed(static_cast<uint32_t>(i));
+        const auto fabi = Rand::Int(3, 11);
+
+        auto h = sched.Start([&](uint32_t fabIndex) -> Async<int> {
+            int rootValue = co_await FibCoro(fabIndex);
+            finished++;
+            co_return rootValue;
+        },
+                             fabi);
+
         handles.push_back(std::move(h));
     }
 
-    // Cancel half
+    // Test cancel half
     for (size_t i = 0; i < count; i += 2)
     {
         handles[i].Stop();
     }
 
+    double maxUpdateTime = 0;
+    auto   start         = std::chrono::high_resolution_clock::now();
+
     // Drive scheduler until remaining complete or timeout
-    auto done = [&]() {
-        for (size_t i = 1; i < count; i += 2)
-        {
-            if (handles[i].GetState().value() != AsyncState::Succeed)
-                return false;
-        }
-        return true;
-    };
-    for (int iter = 0; iter < 10000000 && !done(); ++iter)
+    for (int iter = 0; iter < 10000000 && finished != count / 2; ++iter)
     {
+        auto updateStart = std::chrono::high_resolution_clock::now();
         sched.Update();
+        auto updateEnd = std::chrono::high_resolution_clock::now();
+
+        const auto   timeGap       = std::chrono::duration_cast<std::chrono::microseconds>(updateEnd - updateStart).count();
+        const double curUpdateTime = timeGap / 1000.0;
+        if (maxUpdateTime < curUpdateTime)
+            maxUpdateTime = curUpdateTime;
+
+        simTime += 0.0166666666f;
     }
-    assert(done() && "Scheduler did not finish in time");
+
+    std::cout << "max update time " << maxUpdateTime << "ms" << std::endl;
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "stress test time "
+              << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0 << "ms" << std::endl;
+
+    assert(finished == count / 2 && "Scheduler did not finish in time");
 
     // Verify results
+    //
+    std::array<uint32_t, 10> fibResults;
+    for (int i = 0; i < 10; ++i)
+    {
+        fibResults[i] = Fibonacci(i);
+    }
+
     for (size_t i = 1; i < count; i += 2)
     {
         auto r = handles[i].TakeResult();
         assert(r.has_value());
-        // Fibonacci correctness for small fibN
+
+        Rand::SetSeed(static_cast<uint32_t>(i));
+        const auto fabi = Rand::Int(3, 11);
+        assert(r.value() == fibResults[fabi]);
     }
-    std::cout << "TestStress(" << count << ", " << fibN << ") passed\n";
+
+    std::cout << "TestStress(" << count << ") passed\n";
 }
 
 int main()
@@ -839,7 +920,7 @@ int main()
     TestHandle();
     TestMemberCoroutines();
 
-    TestStress(10000, 10);
+    StressTest(20000);
 
     std::cout << "All tests passed successfully." << std::endl;
     return 0;
