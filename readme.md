@@ -524,16 +524,16 @@ Therefore, your project should have **strict rules** about which methods can be 
 ## Next Steps
 Currently, Tokoro can be considered feature-complete. However, there are several directions I’d like to explore further. These features are not guaranteed to be added to the library, but I’m glad to investigate them if we find a good approach.
 
-* **Optimize allocation performance for TimeQueue insertions in the scheduler:**\
+* **Optimize allocation performance for TimeQueue insertions in the scheduler:**
   Currently, TimeQueue uses `std::multiset`, which fits our needs well but incurs dynamic allocations on every insert. I want to explore ways to optimize this further to reduce allocation overhead.
 
-* **Implement a Callback Awaiter:**\
+* **Implement a Callback Awaiter:**
   A Callback Awaiter would allow users to wait for external signals more efficiently. Game engines or frameworks could build on this to create custom awaiters—for example, an `AnimationAwaiter` letting users `co_await Entity.Play("Die")`. While `WaitUntil` and `WaitWhile` currently provide similar functionality, they require the coroutine to resume and check the condition every frame. A Callback Awaiter would enable resuming the coroutine only when the external event occurs, avoiding constant polling.
 
-* **ThreadPool Awaiter:**\
+* **ThreadPool Awaiter:**
   Although tokoro focuses on single-threaded coroutines, it doesn’t exclude the possibility of providing a convenient thread pool tool for dispatching heavy CPU tasks. The challenge is to implement this without impacting single-threaded coroutine performance.
 
-* **Debug utilities for tracking nested coroutine call chains:**\
+* **Debug utilities for tracking nested coroutine call chains:**
   Tools to help trace the call hierarchy of nested coroutines would greatly aid debugging and improve developer experience.
 
 
