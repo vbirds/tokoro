@@ -55,7 +55,33 @@ int main()
 }
 ```
 
+
+
+## 📖 Table of Contents
+
+- [📚 Tutorial](#-tutorial)
+  - [Integrating Tokoro](#integrating-tokoro)
+  - [Decide Scheduler Scope](#decide-scheduler-scope)
+  - [Creating a Coroutine](#creating-a-coroutine)
+  - [Starting a Root Coroutine](#starting-a-root-coroutine)
+  - [Coroutine Lifetimes](#coroutine-lifetimes)
+  - [The Way to Handle It](#the-way-to-handle-it)
+  - [Waiters](#waiters)
+  - [Custom Updates](#custom-updates)
+  - [Execution Flow](#execution-flow)
+  - [Exceptions](#exceptions)
+- [Performance](#performance)
+- [FAQ](#faq)
+- [Best Practices](#best-practices)
+- [Next Steps](#next-steps)
+- [Inspiring](#inspiring)
+- [Platform Compatibility](#platform-compatibility)
+- [License](#license)
+
+
+
 ## 📚 Tutorial
+
 ### Integrating Tokoro
 **tokoro** is a lightweight, header-only library with zero dependencies. To integrate it into your project:
 
@@ -130,7 +156,7 @@ co_await WaitUntil([&]()->bool{return launchComplete;});
 co_await WaitWhile([&]()->bool{return playingStartCutscene;});
 ```
 
-In the awaiters section, we'll introduce **combinator awaiters**—`All` and `Any`—which enable you to construct even more complex coroutine execution flows.
+In the [awaiters](#awaiters) section, we'll introduce **combinator awaiters**—`All` and `Any`—which enable you to construct even more complex coroutine execution flows.
 
 ### Starting a Root Coroutine
 
@@ -223,7 +249,7 @@ When a `Handle` is destroyed, its destructor will stop and release the associate
 schedular.Start(DelayAction).Forget(); // Handle is discard, but the coroutine will keep running to its end.
 ```
 > ⚠️ **Note:** `Forget` handles without understanding their lifetime or dependencies is generally **not recommended**. Managing coroutine lifetimes intentionally is essential for writing safe and robust coroutine logic.
-We’ll explore this further in the **Best Practices** section.
+We’ll explore this further in the [Best Practices](#best-practices) section.
 
 #### bool Handle::IsValid()
 `IsValid()` indicates whether the handle was obtained from a call to `Scheduler::Start()`.\
@@ -235,7 +261,7 @@ Unlike many modern coroutine libraries that use cancellation tokens, Tokoro reli
 
 This simplified **stop mechanism** eliminates much of the complexity and pain associated with cancellation token systems. In most cases, you don’t need to add special cancellation handling inside your coroutines. (Tokoro’s focus on single-threaded execution helps achieve this simplicity.)
 
-However, in some cases, you still need to ensure proper resource cleanup and state rollback using RAII, especially when coroutines are stopped prematurely. We will cover this in **Best Practices** section.
+However, in some cases, you still need to ensure proper resource cleanup and state rollback using RAII, especially when coroutines are stopped prematurely. We will cover this in [Best Practices](#best-practices) section.
 
 #### std::optional\<AsyncState\> Handle::GetState()
 `GetState()` provides two layers of information about the coroutine's status.
@@ -252,7 +278,7 @@ However, in some cases, you still need to ensure proper resource cleanup and sta
 
   * **Stopped**: The coroutine was manually stopped by `Handle::Stop()`.
 
-> **Note:** Receiving an `AsyncState` from `GetState()` does **not** guarantee that the underlying coroutine object still exists; it might have already been destroyed. Refer to the **Coroutine Lifetimes** section for details.
+> **Note:** Receiving an `AsyncState` from `GetState()` does **not** guarantee that the underlying coroutine object still exists; it might have already been destroyed. Refer to the [Coroutine Lifetimes](#coroutine-lifetimes) section for details.
 
 #### bool Handle::IsRunning()
 Sometimes repeatedly writing this can be tedious:
@@ -274,7 +300,7 @@ If the coroutine ended due to an unhandled exception, `TakeResult()` will rethro
 As mentioned earlier, `Forget()` is typically used for **fire-and-forget** coroutines—when you want to start a coroutine without holding onto its handle.
 However, you can still use the handle normally **after** calling `Forget()`. All other handle functions will continue to work as expected.
 
-### Waiters
+### Awaiters
 Currently, tokoro provides only **three types of explicit awaiters** you can use directly. (There are some implicit awaiters under the hood, but as a library user, you don’t need to worry about those.)
 
 #### Wait
@@ -285,7 +311,7 @@ Currently, tokoro provides only **three types of explicit awaiters** you can use
 
 Internally, the timed queue only checks and resumes coroutines that are due at the current time point, making it highly efficient. For example, `Wait(std::numeric_limits<double>::max())` only incurs the cost of inserting into the queue and minimal memory overhead—no extra overhead in regular updates.
 
-You can also specify custom update and time types via `Wait(UpdateType, TimeType)`. For details on using your own update types and timers, please refer to the **Custom Updates** section.
+You can also specify custom update and time types via `Wait(UpdateType, TimeType)`. For details on using your own update types and timers, please refer to the [Custom Updates](#custom-updates) section.
 
 #### All
 `All` waits for **all** coroutines it holds to finish. It returns a tuple containing the differen types of return values of each sub-coroutine.
@@ -449,7 +475,10 @@ If the exception goes unhandled, the root coroutine will end in the `AsyncState:
 
 > ⚠️ **Important note (not specific to tokoro)**: If your project is compiled with exceptions disabled (e.g., `/EHs-` or `-fno-exceptions`), any exception will cause a crash immediately. Use with care.
 
+
+
 ## Performance
+
 In game development, **scheduling performance** is one of the most critical metrics when evaluating a coroutine system. tokoro is designed to ensure that the **CPU cost of scheduling a coroutine is only O(log N)**.
 
 To benchmark this, we use the **Fibonacci coroutines stress test** in `TestCoroutine.cpp`. The test runs **10,000 active coroutines**, each randomly scheduled to resume within one second. The results show that the **maximum cost per update is just 0.35ms**—which is **only 2.1% of a single frame at 60 FPS**. This leaves ample headroom for even coroutine-heavy game logic.
@@ -457,7 +486,9 @@ To benchmark this, we use the **Fibonacci coroutines stress test** in `TestCorou
 > ✅ In short, tokoro is built to handle **massive concurrent coroutine usage** with minimal scheduling overhead.
 
 
+
 ## FAQ
+
 #### What's the point of single-threaded coroutines?
 
 While coroutines are often associated with multi-threaded concurrency, **single-threaded coroutines are especially useful for game development**. Because a coroutine is essentially a localized state machine, it fits naturally with frame-based gameplay logic.
@@ -481,7 +512,10 @@ Debugging coroutines in C++ is harder than debugging regular functions, mainly d
 
 > 🔧 In the future, macro tools might help capture coroutine call chains or improve introspection, but we haven’t yet found an elegant, general-purpose solution.
 
+
+
 ## Best Practices
+
 Coroutines can feel so elegant and powerful that **beginners often overuse or misuse them**. Here are some practical tips to keep your coroutine usage safe and robust.
 
 #### Using RAII to Ensure Proper Resource Cleanup When Coroutine Is Stopped Externally
@@ -528,7 +562,10 @@ If you consider all the tips above, you’ll realize that coroutines are not a s
 
 Therefore, your project should have **strict rules** about which methods can be `Async<T>`. If a method can be “normal,” it should stay “normal.” If coroutine logic is truly necessary, it’s better to keep the `Async<T>` methods private within your implementation and expose simple, synchronous APIs to the rest of the codebase.
 
+
+
 ## Next Steps
+
 Currently, Tokoro can be considered feature-complete. However, there are several directions I’d like to explore further. These features are not guaranteed to be added to the library, but I’m glad to investigate them if we find a good approach.
 
 * **Optimize allocation performance for TimeQueue insertions in the scheduler:**
@@ -544,12 +581,20 @@ Currently, Tokoro can be considered feature-complete. However, there are several
   Tools to help trace the call hierarchy of nested coroutines would greatly aid debugging and improve developer experience.
 
 
+
 ## Inspiring
+
 Tokoro is inspired by Unity’s coroutine system and its successor, UniTask.
 
+
+
 ## Platform Compatibility
+
 Tokoro is designed to work on any platform that supports C++20 coroutines. It has been tested on Linux, macOS, and Windows. Support for other platforms depends on community feedback and contributions.
 
+
+
 ## License
+
 Tokoro is released under the MIT License.
 
