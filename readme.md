@@ -127,7 +127,7 @@ In the awaiters section, we'll introduce **combinator awaiters**—`All` and `An
 
 ### Starting a Root Coroutine
 
-`tokoro::Scheduler::Start()` is the only entry point for launching a **root coroutine**. A **root coroutine** is one that is started directly by the `Scheduler`. Coroutines that are launched within a root coroutine are called **sub-coroutines**. All coroutines must be run either as root coroutines or as sub-coroutines within an existing root coroutine.
+`tokoro::Scheduler::Start()` is the only entry point for launching a **root coroutine**. A **root coroutine** is one that is started directly by the `Scheduler`. Coroutines that are started within a coroutine with co_await are called **sub-coroutines**. All coroutines must be run either as root coroutines or as sub-coroutines.
 
 ```C++
 Handle<T> Scheduler::Start(CoroutineFunc, Args ...)
