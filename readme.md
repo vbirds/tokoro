@@ -339,7 +339,7 @@ enum class TimeType
     Count, // Count at last of enum is a must have for tokoro.
 };
 
-// Give alias names for ease of life. Prefix BP is for Blueprint.
+// Give alias names for ease of life. Suffix BP is for Blueprint.
 //
 // Note: You can still use Scheduler, Wait if you really like these names.
 // Just don't introduce 'using namespace tokoro' to your code.
@@ -427,7 +427,7 @@ Current Frame: 11
 Current Frame: 11
 ```
 **Explanation**:
-1. The root coroutine starts immediately on frame 10.
+1. The root coroutine starts immediately in `Scheduler::Start()` call of frame 10.
 2. It invokes the inner coroutine, which also runs immediately—until it hits `co_await Wait()`, where it suspends.
 3. The main coroutine does not continue until the sub-coroutine is resumed (next frame).
 4. On frame 11, the scheduler resumes the suspended inner coroutine, it prints again.
