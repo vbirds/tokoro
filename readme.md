@@ -443,7 +443,7 @@ If the exception goes unhandled, the root coroutine will end in the `AsyncState:
 > ⚠️ **Important note (not specific to tokoro)**: If your project is compiled with exceptions disabled (e.g., `/EHs-` or `-fno-exceptions`), any exception will cause a crash immediately. Use with care.
 
 ## Performance
-In game development, **scheduling performance** is one of the most critical metrics when evaluating a coroutine system. tokoro is designed to ensure that the **CPU cost of resuming a coroutine is only O(log N)**.
+In game development, **scheduling performance** is one of the most critical metrics when evaluating a coroutine system. tokoro is designed to ensure that the **CPU cost of scheduling a coroutine is only O(log N)**.
 
 To benchmark this, we use the **Fibonacci coroutines stress test** in `TestCoroutine.cpp`. The test runs **10,000 active coroutines**, each randomly scheduled to resume within one second. The results show that the **maximum cost per update is just 0.35ms**—which is **only 2.1% of a single frame at 60 FPS**. This leaves ample headroom for even coroutine-heavy game logic.
 
