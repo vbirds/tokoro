@@ -99,8 +99,8 @@ void Engine::Update()
 
 A **tokoro coroutine** must contain at least two elements:
 
-1. It returns `Async\<T\>`, where `T` can be any type that supports copy or move semantics.
-2. It includes **at least one** `co_await` or `co_return` expression.
+1. It returns `Async<T>`, where `T` can be any type that supports copy or move semantics.
+2. It includes **at least one** `co_await` or `co_return` expression. tokoro dose not support `co_yield`.
 
 Below is a minimal example:
 ```C++
@@ -123,7 +123,7 @@ co_await WaitUntil([&]()->bool{return launchComplete;});
 co_await WaitWhile([&]()->bool{return playingStartCutscene;});
 ```
 
-In the next sections, we'll introduce **combinator awaiters**—`All` and `Any`—which enable you to construct even more complex coroutine execution flows.
+In the awaiters section, we'll introduce **combinator awaiters**—`All` and `Any`—which enable you to construct even more complex coroutine execution flows.
 
 ### Starting a Root Coroutine
 
