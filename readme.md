@@ -81,7 +81,7 @@ private:
 }
 ```
 #### Using a Global Singleton Scheduler
-
+tokoro does not comes with a buildin global scheduler, however you can easily create one.
 ```c++
 static tokoro::Scheduler& GlobalScheduler() 
 {
