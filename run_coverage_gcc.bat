@@ -30,8 +30,8 @@ rem    -fprofile-arcs: insert code to record branch/path execution
 rem    -ftest-coverage: generate .gcno files for coverage analysis
 rem    -O0 -g: disable optimization and include debug info
 rem ==========================================================
-echo [*] Compiling: g++ -std=c++20 -O0 -g -fprofile-arcs -ftest-coverage "%SRC%" -o "%OUTPUTFOLDER%\%EXE%"
-g++ -std=c++20 -O0 -g -fprofile-arcs -ftest-coverage -fno-inline "%SRC%" -o "%OUTPUTFOLDER%\%EXE%"
+echo [*] Compiling
+g++ -std=c++20 -O0 -g -fprofile-arcs -ftest-coverage -fno-inline -I./include "%SRC%" -o "%OUTPUTFOLDER%\%EXE%"
 if errorlevel 1 (
     echo [!] Compilation failed, exiting
     exit /b 1

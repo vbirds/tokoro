@@ -14,7 +14,7 @@ rem create output folder
 mkdir %OUTPUTFOLDER%
 
 rem use clang to compile the cpp with coverage enabled.
-clang++ -std=c++20 -fprofile-instr-generate -fcoverage-mapping -o %OUTPUTFOLDER%\%EXE% %SRC%
+clang++ -std=c++20 -fprofile-instr-generate -fcoverage-mapping -I./include -o %OUTPUTFOLDER%\%EXE% %SRC%
 
 rem set profraw file name
 set LLVM_PROFILE_FILE=%OUTPUTFOLDER%\%PROFRAW%

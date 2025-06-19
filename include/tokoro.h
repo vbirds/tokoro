@@ -1,10 +1,10 @@
 #pragma once
 
-#include "defines.h"
-#include "promise.h"
-#include "singleawaiter.h"
-#include "timequeue.h"
-#include "tmplany.h"
+#include "internal/defines.h"
+#include "internal/promise.h"
+#include "internal/singleawaiter.h"
+#include "internal/timequeue.h"
+#include "internal/tmplany.h"
 
 #include <any>
 #include <array>
@@ -830,7 +830,7 @@ public:
 
 } // namespace tokoro
 
-#include "promise.inl"
+#include "internal/promise.inl"
 
 namespace tokoro
 {

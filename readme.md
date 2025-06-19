@@ -57,7 +57,14 @@ int main()
 
 ## 📚 Tutorial
 ### Integrating Tokoro
-**Tokoro** is a lightweight, header-only library with zero dependencies. To add it to your project, simply copy the header files and include them with `#include "tokoro.h"`. Make sure to add the library's directory to your compiler's include path.
+**tokoro** is a lightweight, header-only library with zero dependencies. To integrate it into your project:
+
+- Copy or clone the repository.
+- Add `path_to_tokoro/include` to your compiler's include search paths.
+   *(Note: the `.cpp` and `.bat` files are only for unit testing.)*
+- Add `#include "tokoro.h"` wherever you need coroutine support.
+
+That’s it — you’re ready to go!
 
 ### Decide Scheduler Scope
 `tokoro::Scheduler` can be used either as a local instance or as a global singleton, depending on your project’s architecture and needs.
@@ -545,5 +552,4 @@ Tokoro is designed to work on any platform that supports C++20 coroutines. It ha
 
 ## License
 Tokoro is released under the MIT License.
-
 
