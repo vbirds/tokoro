@@ -1,0 +1,26 @@
+name: CI (Linux)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compile with g++
+        shell: bash
+        run: |
+          echo "[*] Compiling on Linux with g++"
+          g++ -std=c++20 -O2 -I./include TestCoroutine.cpp -o test_binary
+
+      - name: Run tests
+        shell: bash
+        run: |
+          echo "[*] Running tests"
+          ./test_binary
