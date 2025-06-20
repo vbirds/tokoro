@@ -1,4 +1,6 @@
 # tokoro
+[![Coverage Status](https://codecov.io/gh/ShirenY/tokoro/branch/main/graph/badge.svg)](https://codecov.io/gh/ShirenY/tokoro) [![Linux Build Status](https://github.com/ShirenY/tokoro/actions/workflows/ci-linux.yml/badge.svg)](https://github.com/ShirenY/tokoro/actions/workflows/ci-linux.yml) [![macOS Build Status](https://github.com/ShirenY/tokoro/actions/workflows/ci-macos.yml/badge.svg)](https://github.com/ShirenY/tokoro/actions/workflows/ci-macos.yml) [![Windows Build Status](https://github.com/ShirenY/tokoro/actions/workflows/ci-windows.yml/badge.svg)](https://github.com/ShirenY/tokoro/actions/workflows/ci-windows.yml)
+
 **tokoro** is a lightweight, header-only coroutine library designed for modern C++20. Built for game, GUI apps, and any update-driven application. It provides efficient and powerful coroutine scheduling in single thread—ideal for real-time environments.
 
 ### ✨ Highlights
