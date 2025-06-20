@@ -11,34 +11,44 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y lcov gcovr
+      - name: Install coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov gcovr
 
-      - name: Build with coverage flags
+      - name: Compile with coverage flags
+        shell: bash
         run: |
           mkdir build && cd build
           g++ -std=c++20 -O0 -g -fprofile-arcs -ftest-coverage -fno-inline \
             -I../include ../TestCoroutine.cpp -o CodeConvergeTest
 
-      - name: Run tests
+      - name: Run executable
+        shell: bash
         run: |
           cd build
           ./CodeConvergeTest
 
-      - name: Generate LCOV report
+      - name: Generate coverage report
+        shell: bash
         run: |
           cd build
-          gcovr -r .. \
-            --exclude-throw-branches \
-            --exclude-lines-by-pattern "^\s*assert\s*\(" \
-            --object-directory . \
-            --lcov --output coverage.info
+          gcovr -r .. --exclude-throw-branches --exclude-lines-by-pattern "^\\s*assert\\s*\\(" \
+            --object-directory . --html --html-details --output coverage.html
+          gcovr -r .. --exclude-throw-branches --exclude-lines-by-pattern "^\\s*assert\\s*\\(" \
+            --object-directory . --xml --output coverage.xml
 
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
         with:
-          files: build/coverage.info
+          name: coverage-report
+          path: build/coverage.html
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: build/coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
