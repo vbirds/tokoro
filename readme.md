@@ -1,6 +1,4 @@
 # tokoro
-## Overview
-
 **tokoro** is a lightweight, header-only coroutine library designed for modern C++20. Built for game, GUI apps, and any update-driven application. It provides efficient and powerful coroutine scheduling in single thread—ideal for real-time environments.
 
 ### ✨ Highlights
@@ -472,6 +470,8 @@ tokoro fully supports exceptions—yes, even though I personally don't see why y
 When an exception is thrown inside a coroutine, it will propagate **upward through the coroutine chain**, just like in regular function calls. If it's not caught along the way, the exception will eventually reach the **root coroutine**. During this unwinding process, all scoped objects will be destroyed properly, so **RAII** should be your go-to for resource cleanup.
 
 If the exception goes unhandled, the root coroutine will end in the `AsyncState::Failed` state, and no result will be produced. However, if you later call `Handle::TakeResult()` on that coroutine, the stored exception will be **rethrown once**, allowing you to catch and process it outside the coroutine.
+
+**Know Issue**: clang v20.1.0 on windows has a [bug](https://github.com/llvm/llvm-project/issues/143235) that you maybe not able to catch exceptions correctly from sub-coroutines.
 
 > ⚠️ **Important note (not specific to tokoro)**: If your project is compiled with exceptions disabled (e.g., `/EHs-` or `-fno-exceptions`), any exception will cause a crash immediately. Use with care.
 
