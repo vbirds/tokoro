@@ -9,18 +9,16 @@ on:
 jobs:
   build-and-test:
     runs-on: windows-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Compile with MSVC (cl.exe)
-        shell: cmd
-        run: |
-          echo [*] Compiling on Windows with cl.exe
-          cl /EHsc /std:c++20 /I include TestCoroutine.cpp /Fe:test_binary.exe
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile with MSVC
+        run: cl /EHsc /std:c++20 /I include TestCoroutine.cpp /Fe:test_binary.exe
 
       - name: Run tests
-        shell: cmd
-        run: |
-          echo [*] Running tests
-          test_binary.exe
+        run: .\\test_binary.exe
