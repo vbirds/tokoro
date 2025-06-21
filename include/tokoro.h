@@ -215,7 +215,7 @@ public:
 
     /// Start: start a coroutine and return its handle.
     /// func: Callable object that returns Async<T>. Could be a lambda or function.
-    /// funcArgs: parameters of AsyncFunc£¬Start will forward them to construct the coroutine.
+    /// funcArgs: parameters of AsyncFunc, Start will forward them to construct the coroutine.
     /// Return value: The Handle of new started coroutine. When handle destroyed they will automatically
     ///               Stop() the coroutine, so you should never discard the return. You can use Forget()
     ///               to do fire and forget style:
