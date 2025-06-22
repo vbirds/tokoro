@@ -390,6 +390,13 @@ template <internal::CountEnum UpdateEnum, internal::CountEnum TimeEnum>
 class SchedulerBP : public internal::CoroManager
 {
 public:
+    // Scheduler is neither copyable or movable.
+    SchedulerBP()                              = default;
+    SchedulerBP(const SchedulerBP&)            = delete;
+    SchedulerBP& operator=(const SchedulerBP&) = delete;
+    SchedulerBP(SchedulerBP&&)                 = delete;
+    SchedulerBP& operator=(SchedulerBP&&)      = delete;
+
     ~SchedulerBP()
     {
         // Clear coroutines first, so that the Wait objects can be safely removed from mExecuteQueues.

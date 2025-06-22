@@ -96,6 +96,12 @@ That’s it — you’re ready to go!
 `tokoro::Scheduler` can be used either as a local instance or as a global singleton, depending on your project’s architecture and needs.
 
 #### Using a Scheduler Locally
+
+The `Scheduler` can be used anywhere regular updates are needed. You can easily embed it into a small project or a game.
+
+> **Note:** The `Scheduler` is neither copyable nor movable.  
+> While being non-copyable is straightforward, it is also non-movable because member coroutines typically relies on `this` pointers in local usage, which cannot be rebound, so it's non-movable to avoid miss use.
+
 ```c++
 // The concept of an "Entity" exists in most game engines.
 // In Unreal Engine, it's called an "Actor"; in Unity, it's a "GameObject".
