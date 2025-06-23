@@ -598,7 +598,7 @@ Tokoro is inspired by Unity’s coroutine system and its successor, UniTask.
 
 ## Platform Compatibility
 
-Tokoro is designed to work on any platform that supports C++20 coroutines. It has been tested on Linux, macOS, and Windows. Support for other platforms depends on community feedback and contributions.
+Tokoro is designed to work on any platform that supports C++20 coroutines. It has been tested on Linux, macOS, and Windows.
 
 
 
