@@ -97,7 +97,7 @@ That’s it — you’re ready to go!
 
 #### Using a Scheduler Locally
 
-The `Scheduler` can be used anywhere regular updates are needed. You can easily embed it into a small project or a game.
+The `Scheduler` can be used anywhere regular updates are needed. You can easily embed it into a small part of a game.
 
 > **Note:** The `Scheduler` is neither copyable nor movable.  
 > While being non-copyable is straightforward, it is also non-movable because member coroutines typically relies on `this` pointers in local usage, which cannot be rebound, so it's non-movable to avoid miss use.
