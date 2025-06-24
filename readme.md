@@ -557,7 +557,7 @@ In this code, the intention is to check one entity per frame to spread out the w
 There is no one-size-fits-all solution for handling such data consistency issues; you need to design an approach that fits your specific case. In this particular scenario, a better strategy might be to use a current index as the iterator and verify its validity each frame before accessing the container.
 
 #### Be cautious with coroutines that can run multiple instances simultaneously
-As mentioned in the previous tip, accessing shared and mutable data can be risky. If a coroutine reads from the same data but can have multiple instances running concurrently, it’s easy to end up with shared data being modified unexpectedly.
+As mentioned in the previous tip, accessing shared and mutable data can be risky. If a coroutine reads&writes from/to the same data but can have multiple instances running at same time, it’s easy to end up with shared data being modified unexpectedly.
 A simple rule of thumb: **if your coroutine modifies shared data, avoid launching multiple instances simultaneously.** You can keep a handle to the coroutine instance to check whether it’s safe to launch a second one, or you can design your system so that launching a new instance replaces the old one—whatever suits your case best.
 On the other hand, if your coroutine only reads from shared data or does not access shared data at all, running multiple instances concurrently is usually safe. But remember to still be mindful of the concerns raised in the previous tip.
 
