@@ -27,7 +27,7 @@ Here's a simple, compilable example showcasing Tokoro in action.
 #include <chrono>
 
 using namespace tokoro;
-Scheduler schedular;
+Scheduler scheduler;
 
 Async<void> awkwardHello(std::string somebody, double holdSeconds)
 {
@@ -41,14 +41,14 @@ Async<void> awkwardHello(std::string somebody, double holdSeconds)
 
 int main()
 {    
-    schedular.Start(awkwardHello, "tokoro", 1).Forget();
+    scheduler.Start(awkwardHello, "tokoro", 1).Forget();
     
     // Simulate a game update loop
     while(true)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
         
-        schedular.Update();
+        scheduler.Update();
     }
 
     return 0;
