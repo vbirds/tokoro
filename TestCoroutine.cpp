@@ -1,6 +1,7 @@
 #include "tokoro.h"
 #include <cassert>
 #include <iostream>
+#include <source_location>
 #include <vector>
 
 using namespace tokoro;
@@ -759,6 +760,120 @@ void TestMemberCoroutines()
     std::cout << "TestMemberCoroutines passed\n";
 }
 
+// A test to make sure no extra object constructed or copied.
+//
+class LifeTimeChecker
+{
+public:
+    std::string name;
+
+    inline static int ConstructCount  = 0;
+    inline static int CopyCount       = 0;
+    inline static int MoveCount       = 0;
+    inline static int CopyAssignCount = 0;
+    inline static int MoveAssignCount = 0;
+    inline static int DestructCount   = 0;
+
+    static void ClearCounts()
+    {
+        ConstructCount  = 0;
+        CopyCount       = 0;
+        MoveCount       = 0;
+        CopyAssignCount = 0;
+        MoveAssignCount = 0;
+        DestructCount   = 0;
+    }
+
+    // LCOV_EXCL_START This function should never be used. Prepared for incorrect construction.
+    LifeTimeChecker(const std::source_location& location = std::source_location::current())
+        : name("default")
+    {
+        ++ConstructCount;
+        log("Default Constructor", location);
+    }
+    // LCOV_EXCL_STOP
+
+    LifeTimeChecker(const std::string& n, const std::source_location& location = std::source_location::current())
+        : name(n)
+    {
+        ++ConstructCount;
+        log("Custom Constructor", location);
+    }
+
+    LifeTimeChecker(const LifeTimeChecker&      other,
+                    const std::source_location& location = std::source_location::current())
+        : name(other.name + "-c")
+    {
+        ++CopyCount;
+        log("Copy Constructor", location);
+    }
+
+    LifeTimeChecker(LifeTimeChecker&&           other,
+                    const std::source_location& location = std::source_location::current()) noexcept
+        : name(std::move(other.name))
+    {
+        ++MoveCount;
+        log("Move Constructor", location);
+    }
+
+    LifeTimeChecker& operator=(const LifeTimeChecker& other)
+    {
+        ++CopyAssignCount;
+        log("Copy Assignment", std::source_location::current());
+        if (this != &other)
+        {
+            name = other.name + "-c";
+        }
+        return *this;
+    }
+
+    LifeTimeChecker& operator=(LifeTimeChecker&& other) noexcept
+    {
+        ++MoveAssignCount;
+        log("Move Assignment", std::source_location::current());
+        if (this != &other)
+        {
+            name = std::move(other.name);
+        }
+        return *this;
+    }
+
+    ~LifeTimeChecker()
+    {
+        ++DestructCount;
+        log("Destructor", std::source_location::current());
+    }
+
+private:
+    void log(const std::string& action, const std::source_location& location) const
+    {
+        // std::cout << "[" << action << "] "
+        //           << "Object: " << name << " | "
+        //           << "At: " << location.file_name() << ":" << location.line()
+        //           << " in " << location.function_name() << "\n";
+    }
+};
+
+void TestReturnObjLifetime()
+{
+    auto handle = GlobalScheduler().Start([]() -> Async<LifeTimeChecker> {
+        co_return LifeTimeChecker("A");
+    });
+
+    for (int i = 0; i < 10; ++i)
+    {
+        GlobalScheduler().Update();
+    }
+
+    LifeTimeChecker ret = handle.TakeResult().value();
+    assert(LifeTimeChecker::ConstructCount == 1);
+    assert(LifeTimeChecker::CopyCount == 0);
+
+    LifeTimeChecker::ClearCounts();
+
+    std::cout << "TestReturnObjLifetime passed\n";
+}
+
 class Rand
 {
 public:
@@ -919,6 +1034,7 @@ int main()
     TestThrowException();
     TestHandle();
     TestMemberCoroutines();
+    TestReturnObjLifetime();
 
     StressTest(20000);
 
