@@ -18,7 +18,7 @@ Designed to be lightweight and modular, yet expressive enough to handle complex 
 Not a coroutine library for maximizing multi-core CPU throughput. ( There are quite some coroutine libraries doing that. ) However, you can still delegate computation to threads and return results into tokoro coroutines.
 
 ### Hello tokoro
-Here's a simple, compilable example showcasing Tokoro in action.
+Here's a simple, compilable example showcasing tokoro in action.
 ```C++
 // This example is compilable, make sure you enable the C++ 20 flag.
 #include "tokoro.h"
@@ -60,13 +60,13 @@ int main()
 ## 📖 Table of Contents
 
 - [📚 Tutorial](#-tutorial)
-  - [Integrating Tokoro](#integrating-tokoro)
+  - [Integrating tokoro](#integrating-tokoro)
   - [Decide Scheduler Scope](#decide-scheduler-scope)
   - [Creating a Coroutine](#creating-a-coroutine)
   - [Starting a Root Coroutine](#starting-a-root-coroutine)
   - [Coroutine Lifetimes](#coroutine-lifetimes)
   - [The Way to Handle It](#the-way-to-handle-it)
-  - [Waiters](#waiters)
+  - [Awaiters](#awaiters)
   - [Custom Updates](#custom-updates)
   - [Execution Flow](#execution-flow)
   - [Exceptions](#exceptions)
@@ -82,7 +82,7 @@ int main()
 
 ## 📚 Tutorial
 
-### Integrating Tokoro
+### Integrating tokoro
 **tokoro** is a lightweight, header-only library with zero dependencies. To integrate it into your project:
 
 - Copy or clone the repository.
@@ -262,10 +262,10 @@ We’ll explore this further in the [Best Practices](#best-practices) section.
 It does **not** reflect the current status of the coroutine or the scheduler.
 
 #### void Handle::Stop()
-`Stop()` is the only method in Tokoro’s cancellation system that allows you to externally stop a suspended coroutine.\
-Unlike many modern coroutine libraries that use cancellation tokens, Tokoro relies on **RAII** and suspend points to safely handle coroutine cancellation. This design frees you from managing cumbersome cancellation tokens and passing them through nested coroutines.
+`Stop()` is the only method in tokoro’s cancellation system that allows you to externally stop a suspended coroutine.\
+Unlike many modern coroutine libraries that use cancellation tokens, tokoro relies on **RAII** and suspend points to safely handle coroutine cancellation. This design frees you from managing cumbersome cancellation tokens and passing them through nested coroutines.
 
-This simplified **stop mechanism** eliminates much of the complexity and pain associated with cancellation token systems. In most cases, you don’t need to add special cancellation handling inside your coroutines. (Tokoro’s focus on single-threaded execution helps achieve this simplicity.)
+This simplified **stop mechanism** eliminates much of the complexity and pain associated with cancellation token systems. In most cases, you don’t need to add special cancellation handling inside your coroutines. (tokoro’s focus on single-threaded execution helps achieve this simplicity.)
 
 However, in some cases, you still need to ensure proper resource cleanup and state rollback using RAII, especially when coroutines are stopped prematurely. We will cover this in [Best Practices](#best-practices) section.
 
@@ -536,7 +536,7 @@ This issue is especially easy to overlook for beginners due to the delayed execu
 A recommended approach is to take advantage of the `Handle`’s RAII behavior: If the resources your coroutine depends on are about to be destroyed, make sure the `Handle` is destroyed along with them, so the coroutine stops safely.
 
 #### Single thread means no concurrent issues, but you still need to take care the shared status.
-As mentioned earlier, references and pointers to data outside a coroutine can cause problems. In Tokoro, since most operations run on a single thread, users generally don't need to worry about mutexes or atomic operations. However, if other parts of your program modify the same memory your coroutine accesses, data corruption can easily occur.
+As mentioned earlier, references and pointers to data outside a coroutine can cause problems. In tokoro, since most operations run on a single thread, users generally don't need to worry about mutexes or atomic operations. However, if other parts of your program modify the same memory your coroutine accesses, data corruption can easily occur.
 
 For example:
 ```cpp
@@ -574,7 +574,7 @@ Therefore, your project should have **strict rules** about which methods can be 
 
 ## Next Steps
 
-Currently, Tokoro can be considered feature-complete. However, there are several directions I’d like to explore further. These features are not guaranteed to be added to the library, but I’m glad to investigate them if we find a good approach.
+Currently, tokoro can be considered feature-complete. However, there are several directions I’d like to explore further. These features are not guaranteed to be added to the library, but I’m glad to investigate them if we find a good approach.
 
 * **Optimize allocation performance for TimeQueue insertions in the scheduler:**
   Currently, TimeQueue uses `std::multiset`, which fits our needs well but incurs dynamic allocations on every insert. I want to explore ways to optimize this further to reduce allocation overhead.
@@ -592,17 +592,17 @@ Currently, Tokoro can be considered feature-complete. However, there are several
 
 ## Inspiring
 
-Tokoro is inspired by Unity’s coroutine system and its successor, UniTask.
+tokoro is inspired by Unity’s coroutine system and its successor, UniTask.
 
 
 
 ## Platform Compatibility
 
-Tokoro is designed to work on any platform that supports C++20 coroutines. It has been tested on Linux, macOS, and Windows.
+tokoro is designed to work on any platform that supports C++20 coroutines. It has been tested on Linux, macOS, and Windows.
 
 
 
 ## License
 
-Tokoro is released under the MIT License.
+tokoro is released under the MIT License.
 
